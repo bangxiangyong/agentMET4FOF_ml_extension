@@ -1,287 +1,186 @@
-from agentMET4FOF.agents import AgentMET4FOF
+import os
+import pickle
+from datetime import datetime
+
+from sklearn import datasets
+from sklearn.metrics import f1_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import RBF
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neural_network import MLPClassifier
+
+# from agentMET4FOF.agentMET4FOF.agents import AgentMET4FOF, Coalition
+import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
+from agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
+
 import pandas as pd
-from sklearn.model_selection import ParameterGrid, KFold
-import copy
 
-class ML_TransformerAgent(AgentMET4FOF):
-    def init_parameters(self,method=None, **kwargs):
-        if ("function" in type(method).__name__) or ("method" in type(method).__name__):
-            self.method = method
-        else:
-            self.method = method(**kwargs)
-        self.models = {}
-        self.hyperparams = kwargs
-        #for single functions passed to the method
-        for key in kwargs.keys():
-            self.set_attr(key=kwargs[key])
+class IRIS_Datastream(DataStreamMET4FOF):
+    def __init__(self):
+        iris = datasets.load_iris()
+        self.set_data_source(quantities=iris.data, target=iris.target)
 
-    def on_received_message(self,message):
-        #update chain
-        chain = self.get_chain(message)
+# Datastream Agent
+class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
+    """
+    A base class for ML data-streaming agent, which takes into account the train/test split.
 
-        #if data is dict, with 'x' in keys
-        if type(message['data']) == dict and 'x' in message['data'].keys():
-            X= message['data']['x']
-            Y= message['data']['y']
-        else:
-            X=message['data']
-            Y=None
+    The agent_loop behaviour are based on "current_state":
+    1) in "Train", it will send out train and test batch of data, and then set to "Idle" state
+    2) in "Simulate", it will send out test data one-by-one in a datastream fashion.
+    3) Output form : {"quantities": iterable, "target": iterable}
+    """
 
-        #if it is train, and has fit function, then fit it first.
-        if message['channel'] == 'train':
-            if hasattr(self.method, 'fit'):
-                self.models.update({chain:copy.deepcopy(self.method).fit(X,Y)})
-                if hasattr(self.method,'predict'):
-                    return 0
+    parameter_choices = {"datastream": ["IRIS"], "train_size": [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]}
+    parameter_map = {"datastream":{"IRIS":IRIS_Datastream}}
 
-        #proceed in transforming or predicting
-        if hasattr(self.method, 'transform'):
-            if chain in self.models.keys():
-                results = self.models[chain].transform(X)
-            else:
-                results = self.method.transform(X)
-        elif hasattr(self.method, 'predict'):
-            if chain in self.models.keys():
-                results = self.models[chain].predict(X)
-            else:
-                results = self.method.predict(X)
-        else: #it is a plain function
-            results = self.method(X, **self.hyperparams)
+    def init_parameters(self, random_state=123, datastream="IRIS", train_size=0.8, **data_params):
+        datastream = self.parameter_map["datastream"][datastream]
+        self.datastream = datastream(**data_params)
 
-        #send out
-        #if it is a base model, don't send out the predicted train results
-        chain= chain+"->"+self.name
-        if hasattr(self.method, 'predict'):
-            #check if uncertainty is included
-            if type(results) == tuple and len(results) == 2:
-                y_pred = results[0]
-                y_unc = results[1]
-                self.send_output({'x':X, 'y_true':Y, 'y_pred':y_pred,'y_unc':y_unc,'chain':chain},channel=message['channel'])
-            else:
-                self.send_output({'x':X, 'y_true':Y, 'y_pred':results,'chain':chain},channel=message['channel'])
-        else:
-            self.send_output({'x':results, 'y':Y,'chain':chain},channel=message['channel'])
-
-    def get_chain(self,message):
-        chain =""
-        if type(message['data']) == dict and 'chain' in message['data'].keys():
-            chain = message['data']['chain']
-        else:
-            chain = message['from']
-        return chain
-
-class ML_DataStreamAgent(AgentMET4FOF):
-    def init_parameters(self, data_name="unnamed_data", train_mode={"Prequential","Kfold5","Kfold10"}, x=None, y=None):
-        #if data_name is provided, will assign to pre-made datasets,
-        #otherwise for custom dataset, three parameters : data_name, x and y will need to be assigned
-        self.data_name = data_name
-        self.x = x
-        self.y = y
-        if type(train_mode) == set:
-            self.train_mode = "Kfold5"
+        self.train_size = train_size
+        self.random_state = random_state
+        x_train, x_test, y_train, y_test = train_test_split(self.datastream.quantities, self.datastream.target,
+                                                            train_size=self.train_size,
+                                                            random_state=random_state)
+        self.x_train = x_train
+        self.x_test = x_test
+        self.y_train = y_train
+        self.y_test = y_test
 
     def agent_loop(self):
         if self.current_state == "Running":
-            if self.train_mode == "Kfold5":
-                self.kf = KFold(n_splits=5,shuffle=True)
-                for train_index, test_index in self.kf.split(self.x):
-                    x_train, x_test = self.x[train_index], self.x[test_index]
-                    y_train, y_test = self.y[train_index], self.y[test_index]
-                    self.send_output({'x':x_train,'y':y_train},channel="train")
-                    self.send_output({'x':x_test,'y':y_test},channel="test")
-            self.current_state = "Stop"
+            self.send_output({"quantities":self.x_train, "target":self.y_train},channel="train")
+            self.send_output({"quantities":self.x_test, "target":self.y_test},channel="test")
+            self.current_state = "Idle"
 
+        elif self.current_state == "Simulate":
+            self.send_output({"quantities": self.datastream.next_sample(batch_size=1)}, channel="simulate")
 
-class ML_EvaluatorAgent(AgentMET4FOF):
-    def init_parameters(self, methods=None, eval_params=[], ML_exp=True, **kwargs):
-        if type(methods) is not list:
-            methods = [methods]
-        self.methods = methods
-        self.eval_params = eval_params
-        self.kwargs = kwargs
-        self.ML_exp = ML_exp
+# Transform Agent
+class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
+    """
+    A base class for ML_Transform functions, which takes into account the need for fit/transform data
+    In `init_parameters`, the `transform_method` is assumed to be a class or function.
+
+    On received message behaviour:
+    1a) If it is a class, the agent expects it to have either fit ("train" channel only) or transform method (any channel) on the incoming data.
+    1b) Otherwise, the agent will call the function directly on the data (any channel).
+    2) Send out the transformed data - {"quantities": iterable, "target": iterable (optional)}
+
+    To inherit:
+    1) Set transform_method with initialisation parameters **model_params
+    2) Override fit method (model is stored in self.model)
+    3) Override transform method (return transformed data with self.model)
+    """
+
+    parameter_choices = {"model": ["MinMax", "GP", "MLP"]}
+    parameter_map = {"model": {"MinMax": MinMaxScaler, "GP":GaussianProcessClassifier, "MLP":MLPClassifier}}
+
+    def init_parameters(self, model=MinMaxScaler, unsupervised=False, **model_params):
+        """
+        Initialise model parameters.
+        Accepts either a class or a function as model.
+        Stores the instantiated model in self.model.
+
+        Parameters
+        ----------
+        model : class or function
+
+        unsupervised : Boolean. Special keyword for handling fitting to 'target' in the self.fit function
+
+        **model_params : keywords for model parameters instantiation.
+        """
+        model = self.parameter_map['model'][model]
+
+        # assume it as a class model to be initialised
+        self.unsupervised = unsupervised
+
+        if hasattr(model, "fit"):
+            self.model = model(**model_params)
+        else:
+            self.model = model
 
     def on_received_message(self, message):
-        #only evaluate if it is not train channel
-        if message['channel'] != 'train':
-            results = {}
-            check_y_unc = False
-            if "y_unc" in message['data'].keys():
-                check_y_unc = True
+        """
+        Handles data from fit/test/simulate channels
+        """
+        # depending on the channel, we train/test using the message's content.
+        channel = message["channel"]
+        if channel == "train":
+            self.fit(message_data=message["data"])
 
-            for method_id, method in enumerate(self.methods):
-                if len(self.eval_params) !=0:
-                    if "y_unc" in method.__code__.co_varnames and check_y_unc:
-                        new_res={str(method.__name__):method(message['data']['y_true'], message['data']['y_pred'], message['data']['y_unc'], **self.eval_params[method_id])}
-                    else:
-                        new_res={str(method.__name__):method(message['data']['y_true'], message['data']['y_pred'], **self.eval_params[method_id])}
-                elif len(self.methods) == 1 and len(self.eval_params) == 0:
-                    if "y_unc" in method.__code__.co_varnames and check_y_unc:
-                        new_res={str(method.__name__):method(message['data']['y_true'], message['data']['y_pred'], message['data']['y_unc'], **self.kwargs)}
-                    else:
-                        new_res={str(method.__name__):method(message['data']['y_true'], message['data']['y_pred'], **self.kwargs)}
-                else:
-                    if "y_unc" in method.__code__.co_varnames and check_y_unc:
-                        new_res={str(method.__name__):method(message['data']['y_true'], message['data']['y_pred'],message['data']['y_unc'])}
-                    else:
-                        new_res={str(method.__name__):method(message['data']['y_true'], message['data']['y_pred'])}
-                results.update(new_res)
-            if type(message['data']) == dict and 'chain' in message['data'].keys():
-                agent_chain = message['data']['chain']
-                for key in results.keys():
-                    self.send_output({agent_chain+"-"+key: results[key]})
+        if (channel in ["train","test","simulate"]):
+            # run prediction/transformation
+            transformed_data = self.transform(message["data"])
 
+            # send output
+            target_available = True if "target" in message["data"].keys() else False
+            if target_available:
+                self.send_output({"quantities":transformed_data, "target":message["data"]["target"]}, channel=channel)
             else:
-                self.send_output(results)
+                self.send_output({"quantities":transformed_data}, channel=channel)
 
-            if self.ML_exp:
-                self.log_info("WALAO")
-                if check_y_unc:
-                    log_results = {"chain":agent_chain, "raw": pd.DataFrame.from_dict({'y_true': message['data']['y_true'],'y_pred':message['data']['y_pred'],'y_unc':message['data']['y_unc']})}
-                else:
-                    log_results = {"chain":agent_chain, "raw": pd.DataFrame.from_dict({'y_true': message['data']['y_true'],'y_pred':message['data']['y_pred']})}
-                log_results.update(results)
-                self.log_info(str(results))
-                self.log_ML(log_results)
-
-
-
-
-
-
-class AgentPipeline:
-    def __init__(self, agentNetwork=None,*argv, hyperparameters=None):
-
-        # list of dicts where each dict is of (key:list of hyperparams)
-        # each hyperparam in the dict will be spawned as an agent
-        agentNetwork = agentNetwork
-        self.hyperparameters = hyperparameters
-        self.pipeline = self.make_agent_pipelines(agentNetwork, argv, hyperparameters)
-
-    def make_transform_agent(self,agentNetwork, pipeline_component=None, hyperparameters={}):
-        if ("function" in type(pipeline_component).__name__) or ("method" in type(pipeline_component).__name__):
-            transform_agent = agentNetwork.add_agent(pipeline_component.__name__ +"_Agent", agentType=ML_TransformerAgent)
-            transform_agent.init_parameters(pipeline_component,**hyperparameters)
-        elif issubclass(type(pipeline_component), AgentMET4FOF):
-            transform_agent = pipeline_component
-            transform_agent.init_parameters(**hyperparameters)
-        else: #class objects with fit and transform
-            transform_agent = agentNetwork.add_agent(pipeline_component.__name__ +"_Agent", agentType=ML_TransformerAgent)
-            transform_agent.init_parameters(pipeline_component,**hyperparameters)
-        return transform_agent
-
-    def make_agent_pipelines(self,agentNetwork=None, argv=[], hyperparameters=None):
-        if agentNetwork is None:
-            print("You need to pass an agent network as parameter to add agents")
-            return -1
-        agent_pipeline = []
-
-        if hyperparameters is not None and len(hyperparameters) == 1:
-            if type(hyperparameters[0]) != list:
-                hyperparameters = [hyperparameters]
-
-        for pipeline_level, pipeline_component in enumerate(argv):
-            agent_pipeline.append([])
-            #create an agent for every unique hyperparameter combination
-            if hyperparameters is not None:
-                try:
-                    if pipeline_level < len(hyperparameters):
-                        hyper_param_level = hyperparameters[pipeline_level]
-                    else:
-                        hyper_param_level = {}
-                except:
-                    print("Error getting hyperparameters mapping")
-                    return -1
-
-                #now, hyper_param_level is a list of dictionaries of hyperparams for agents at pipeline_level
-                if type(pipeline_component) == list:
-                    for function_id ,pipeline_function in enumerate(pipeline_component):
-                        print(hyper_param_level)
-                        if (type(hyper_param_level) == dict) or ((len(hyper_param_level)>0) and (len(hyper_param_level[function_id]) > 0)):
-                            if type(hyper_param_level) == dict:
-                                param_grid = list(ParameterGrid(hyper_param_level))
-                            else:
-                                param_grid = list(ParameterGrid(hyper_param_level[function_id]))
-                            print("MAKING {} AGENTS WITH HYPERPARAMS: {}".format(pipeline_function.__name__, param_grid))
-                            for param in param_grid:
-                                transform_agent = self.make_transform_agent(agentNetwork,pipeline_function,param)
-                                agent_pipeline[-1].append(transform_agent)
-
-                        else:
-                            print("MAKING {} AGENT WITH DEFAULT HYPERPARAMS".format(pipeline_function.__name__))
-                            #fill up the new empty list with a new agent for every pipeline function
-                            transform_agent = self.make_transform_agent(agentNetwork,pipeline_function)
-                            agent_pipeline[-1].append(transform_agent)
-
-                #non list, single function, class, or agent
-                else:
-                    #fill up the new empty list with a new agent for every pipeline function
-                    transform_agent = self.make_transform_agent(agentNetwork,pipeline_component)
-                    agent_pipeline[-1].append(transform_agent)
-
-
-            #otherwise there's no hyperparameters usage, proceed with defaults for all agents
-            #the logic similar to before but without hyperparams loop
+    def fit(self, message_data):
+        """
+        Fits self.model on message_data["quantities"]
+        """
+        if hasattr(self.model, "fit"):
+            if self.unsupervised:
+                self.model.fit(message_data["quantities"])
             else:
-                if type(pipeline_component) == list:
-                    for pipeline_function in pipeline_component:
-                        #fill up the new empty list with a new agent for every pipeline function
-                        transform_agent = self.make_transform_agent(agentNetwork,pipeline_function)
-                        agent_pipeline[-1].append(transform_agent)
-                #non list, single function, class, or agent
-                else:
-                    #fill up the new empty list with a new agent for every pipeline function
-                    transform_agent = self.make_transform_agent(agentNetwork,pipeline_component)
-                    agent_pipeline[-1].append(transform_agent)
+                self.model.fit(message_data["quantities"], message_data["target"])
 
-        #now bind the agents on one level to the next levels, for every pipeline level
-        for pipeline_level, _ in enumerate(agent_pipeline):
-            if pipeline_level != (len(agent_pipeline)-1):
-                for agent in agent_pipeline[pipeline_level]:
-                    for agent_next in agent_pipeline[pipeline_level+1]:
-                        agent.bind_output(agent_next)
-        return agent_pipeline
+    def transform(self, message_data):
+        """
+        Transforms and returns message_data["quantities"] using self.model
+        """
 
-    def bind_output(self, output_agent):
-        pipeline_last_level = self.pipeline[-1]
-        if "AgentPipeline" in str(type(output_agent).__name__):
-            for agent in pipeline_last_level:
-                for next_agent in output_agent.pipeline[0]:
-                    agent.bind_output(next_agent)
-        elif type(output_agent) == list:
-            for agent in pipeline_last_level:
-                for next_agent in output_agent:
-                    agent.bind_output(next_agent)
+        if hasattr(self.model, "transform"):
+            transformed_data = self.model.transform(message_data["quantities"])
+        elif hasattr(self.model, "predict"):
+            transformed_data = self.model.predict(message_data["quantities"])
         else:
-            for agent in pipeline_last_level:
-                agent.bind_output(output_agent)
+            transformed_data = self.model(message_data["quantities"])
+        return transformed_data
 
-    def unbind_output(self, output_agent):
-        pipeline_last_level = self.pipeline[-1]
-        if "AgentPipeline" in str(type(output_agent).__name__):
-            for agent in pipeline_last_level:
-                for next_agent in output_agent.pipeline[0]:
-                    agent.unbind_output(next_agent)
-        elif type(output_agent) == list:
-            for agent in pipeline_last_level:
-                for next_agent in output_agent:
-                    agent.unbind_output(next_agent)
-        else:
-            for agent in pipeline_last_level:
-                agent.unbind_output(output_agent)
+class ML_EvaluateAgent(agentmet4fof_module.AgentMET4FOF):
+    """
+    Last piece in the ML-Pipeline to evaluate the model's performance on the datastream.
 
-    def agents(self,ret_hyperparams=False):
-        agent_names = []
-        hyperparams = []
-        for level in self.pipeline:
-            agent_names.append([])
-            hyperparams.append([])
-            for agent in level:
-                agent_names[-1].append(agent.get_attr('name'))
-                if ret_hyperparams:
-                    hyperparams[-1].append(agent.get_attr('hyperparams'))
+    If ml_experiment_proxy is specified, this agent will save the results upon finishing.
+    """
+    parameter_choices = {"evaluate_method": ["f1_score"], "average":["micro"]}
+    parameter_map = {"evaluate_method": {"f1_score": f1_score}}
 
-        if ret_hyperparams:
-            return {"agents":agent_names,"hyperparams":hyperparams}
-        else:
-            return agent_names
+    def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None, **evaluate_params):
+        evaluate_method = self.parameter_map["evaluate_method"][evaluate_method]
+
+        self.ml_experiment_proxy = ml_experiment_proxy
+
+        self.evaluate_methods = [evaluate_method]
+        self.evaluate_params = [evaluate_params]
+
+    def on_received_message(self, message):
+        if message["channel"] == "test":
+            results = {evaluate_method.__name__:evaluate_method(message["data"]["target"], message["data"]["quantities"], **evaluate_param)
+                       for evaluate_method,evaluate_param in zip(self.evaluate_methods,self.evaluate_params)}
+            self.log_info(str(results))
+            self.upload_result(results)
+
+    def upload_result(self, results):
+        if self.ml_experiment_proxy is not None:
+            for key,val in results.items():
+                self.ml_experiment_proxy.upload_result(results={key:val})
+                self.ml_experiment_proxy.save_result()
+
+
+
+
+
+
+
+
+

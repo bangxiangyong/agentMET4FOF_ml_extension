@@ -1,112 +1,155 @@
-import os
-import datetime
+
+from datetime import datetime
 import pickle
+import os
+import pandas as pd
 
-def get_pipeline_details(pipelines):
-    pipeline_details = [pipeline.agents(ret_hyperparams=True) for pipeline in pipelines]
-    return pipeline_details
+import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
+import agentMET4FOF_ml_extension.agents as ml_agents
 
-def save_experiment(ml_experiment):
-    name = ml_experiment.name
-    file = open(ml_experiment.path+"/"+name+".pkl", 'wb')
-    pickle.dump(ml_experiment, file)
-    file.close()
+class ML_Results():
+    """
+    Result from the run of an ML Experiment of the following fields:
 
-def load_experiment(ml_experiment_name="run_1",experiment_folder="ML_EXP"):
-    file_path = experiment_folder+"/"+ml_experiment_name+"/"+ml_experiment_name+".pkl"
-    if os.path.exists(file_path):
-        try:
-            file = open(file_path, 'rb')
-            # dump information to that file
-            data = pickle.load(file)
-            file.close()
-            return data
-        except Exception as e:
-            print("Error in loading experiment: "+ str(e))
-            return -1
-    else:
-        return -1
+    run_details : name of experiment and date run
+    data_pipeline : details of the data pipeline.
+    results : compare results between models
 
+    This will be saved as a pickle to be analysed later on.
+    """
+    def __init__(self, run_details,data_pipeline_params, results):
+        self.run_details = run_details
+        self.data_pipeline_params = data_pipeline_params
+        self.results = results
 
-class ML_Experiment:
-    def __init__(self, agentNetwork, datasets=[], pipelines=[], evaluation=[], name="run", train_mode={"Prequential","Kfold5","Kfold10"}):
+    def get_results_pd(self):
+        return pd.DataFrame(self.results)
 
-        experiment_folder = "ML_EXP"
-        if type(pipelines) is not list:
-            pipelines = [pipelines]
-        if type(datasets) is not list:
-            datasets = [datasets]
-        if type(evaluation) is not list:
-            evaluation = [evaluation]
+class ML_Experiment(agentmet4fof_module.Coalition):
+    """
+    An ML Experiment has a run_date and ml_name identifier.
 
-        #create new directory
-        if not os.path.exists(experiment_folder):
-            os.makedirs(experiment_folder)
+    It consist of a list of dict results, to be logged/appended by ML evaluator agent
+    Every entry consist of:
+     1) the pipeline details (data params, model params, randomstate, train_size)
+     2) performance method and score (e.g f1-score, 0.97)
 
-        #create new directory for name with running number to ensure unique runs
-        running_number = 1
-        name= name.lower()
-        directory_lists_filter = [dir_.lower() for dir_ in os.listdir(experiment_folder) if name in dir_]
-        if len(directory_lists_filter) == 0:
-            name = name+"_1"
-            os.makedirs(experiment_folder+"/"+name)
+    It is foreseen that, we will concatenate the list from multiple experiments into a large dataframe of results,
+    which we can then compare model performances.
+    """
+    def __init__(self, ml_name="simple1", agents=[], random_state=123,base_folder="MLEXP/"):
+
+        super().__init__(name = ml_name, agents=agents)
+        self.base_folder = base_folder
+        self.ml_name = ml_name
+        self.run_date = datetime.now()
+        self.run_details = {"run_name": self.ml_name, "date":self.run_date}
+        self.results = []
+        self.pipeline_ready = False
+        self.random_state = random_state
+
+    def add_agent(self, agent):
+        super().add_agent(agent)
+        datastream_agent, model_agents, evaluate_agent = self.infer_agents(self.agents)
+        if (datastream_agent is not None) and (model_agents is not None) and (evaluate_agent is not None):
+            self.data_pipeline_params = self.infer_connections(datastream_agent=datastream_agent,
+                                   model_agents=model_agents,
+                                   evaluate_agent=evaluate_agent,
+                                   random_state=self.random_state)
+            self.pipeline_ready = True
         else:
-            directory_lists_filter = [int(dir_.split("_")[-1]) for dir_ in os.listdir(experiment_folder) if name in dir_]
-            directory_lists_filter.sort()
-            next_count = int(directory_lists_filter[-1])+1
-            name = name+"_" +str(next_count)
-            os.makedirs(experiment_folder+"/"+name)
+            self.pipeline_ready = False
 
-        #record all the meta data
-        self.name = name
-        self.path = experiment_folder+"/"+self.name
-        self.run_date = datetime.datetime.today()
-        self.run_date_string = self.run_date.strftime("%d-%m-%y %H:%M:%S")
-        self.pipeline_details = get_pipeline_details(pipelines)
-        self.chain_results = []
-        self.datasets = []
 
-        #handle collecting dataset names
-        #handle binding of agents and pipelines
-        for datastream_agent in datasets:
-            self.datasets.append(datastream_agent.get_attr('data_name'))
-            for pipeline in pipelines:
-                for evaluation_agent in evaluation:
-                    pipeline.bind_output(evaluation_agent)
+    def infer_agents(self, agents):
+        datastream_agent = None
+        model_agents = None
+        evaluate_agent = None
 
-                    datastream_agent.bind_output([agent_proxy for agent_proxy in pipeline.pipeline[0]])
+        for agent in agents:
+            if isinstance(agent, ml_agents.ML_DatastreamAgent):
+                datastream_agent = agent
+            if isinstance(agent, ml_agents.ML_TransformAgent):
+                if model_agents is None:
+                    model_agents = [agent]
+                else:
+                    model_agents.append(agent)
+            if isinstance(agent, ml_agents.ML_EvaluateAgent):
+                evaluate_agent = agent
+        return datastream_agent, model_agents, evaluate_agent
 
-        #handle training mode
-        if type(train_mode) == set:
-            self.train_mode = "Kfold5"
+    def convert_method_to_name(self, param):
+        """
+        Extracts name of class
+        """
+        if isinstance(param, str) or isinstance(param, list) or isinstance(param, float) or isinstance(param, float):
+            return param
+
         else:
-            self.train_mode = train_mode
+            return type(param).__name__
 
-        #connect agent network
-        if agentNetwork is not None:
-            self.setup_ml_logger(agentNetwork,self)
+    def infer_connections(self, datastream_agent, model_agents, evaluate_agent, random_state=123):
+        # handle datastream
+        datastream_name = datastream_agent.name
+        data_params = {param_key:self.convert_method_to_name(datastream_agent.get_attr(param_key)) for param_key, _ in datastream_agent.parameter_choices.items() if hasattr(datastream_agent,"parameter_choices")}
 
-    def update_chain_results(self,res):
-        self.chain_results.append(res)
+        # append model name
+        model_name = model_agents[0].name
+        if len(model_agents) >1:
+            for model in model_agents:
+                model_name = model_name+"->"+model.name
+        model_params = [{param_key: self.convert_method_to_name(model_agent.get_attr(param_key)) for param_key, _ in
+                       model_agent.parameter_choices.items() if hasattr(model_agent,"parameter_choices")} for model_agent in model_agents]
 
+        # handle evaluator agent
+        evaluate_agent.ml_experiment_proxy = self
 
-    def setup_ml_logger(self, agentNetwork, ml_experiment):
-        def set_ml_experiment(self, ml_experiment=False):
-            self.ml_experiment = ml_experiment
+        # full data pipeline params
+        data_pipeline_params = {"data": datastream_name, "data_params": data_params, "model": model_name,
+                                     "model_params": model_params, "random_state": random_state}
+        return data_pipeline_params
 
-        def log_handler_ML(self, message, topic):
-            """
-            Handles the results coming from Evaluation agent to be saved into the provided ML experiment file.
-            This updates the results of individual "chains" to be aggregated later for comparisons of chains/pipelines
-            The mechanism relies on regularly saving the ml_experiment object into the pickled file in default ML_EXP folder.
+    def load_result(self):
+        # create folder
+        if not os.path.exists(self.base_folder):
+            os.mkdir(self.base_folder)
 
-            """
-            if self.ml_experiment:
-                self.ml_experiment.update_chain_results(message)
-                save_experiment(self.ml_experiment)
+        # save pickle
+        ml_results = pickle.load(open(self.base_folder+self.ml_name+".p","rb"))
+        return ml_results
 
-        #update logger agent
-        logger_agent = agentNetwork._get_logger()
-        logger_agent.set_method(set_ml_experiment=set_ml_experiment)
-        logger_agent.set_ml_experiment(ml_experiment)
-        logger_agent.bind_log_handler({"ML_EXP":log_handler_ML})
+    def save_result(self):
+        """
+        This pickles the details of an ML Experiment run.
+        An ML Experiment Run consists of the following details:
+        run_details : name of experiment and date run
+        data_pipeline : details of the data pipeline.
+        results : compare results between models
+        """
+
+        run_details = pd.DataFrame([self.run_details])
+        data_pipeline_params = self.data_pipeline_params
+        results = self.results
+
+        ml_results = ML_Results(run_details,data_pipeline_params, results)
+
+        # create folder
+        if not os.path.exists(self.base_folder):
+            os.mkdir(self.base_folder)
+
+        # save pickle
+        pickle.dump(ml_results, open(self.base_folder+self.ml_name+".p","wb"))
+        print("SAVED RESULT")
+
+    def upload_result(self, results={"perf_name":"perf_score"}, model_name=None):
+        """
+        A function to append into the ML_Experiment's results list of dicts
+        """
+        for key,val in results.items():
+            new_result_entry = self.data_pipeline_params.copy()
+            new_result_entry.update({"perf_name":key, "perf_score":val})
+
+            if model_name is not None:
+                new_result_entry.update({"model":model_name})
+
+            self.results.append(new_result_entry)
