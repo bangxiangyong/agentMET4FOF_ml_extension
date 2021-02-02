@@ -7,17 +7,18 @@ import dash_html_components as html
 import dash_core_components as dcc
 import dash_table
 from dash.exceptions import PreventUpdate
-from agentMET4FOF.agentMET4FOF.dashboard import LayoutHelper
+from agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.dashboard import LayoutHelper
 import pandas as pd
 
-from analyse_ml_results import load_ml_exp_details, load_pd_full, groupby_results
+from ..analyse_ml_results import load_ml_exp_details, load_pd_full, groupby_results
 from dash.dependencies import Input, Output, State
 import numpy as np
 from math import log10, floor
-from agentMET4FOF.agentMET4FOF.dashboard.Dashboard_layout_base import Dashboard_Layout_Base
+from agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.dashboard.Dashboard_layout_base import Dashboard_Layout_Base
 
 column_rename_map = {"data": "Datastream Agents", "model": "Model Agents",
                      "random_state": "Random Seed",
+                     "random_seed": "Random Seed",
                      "perf_name": "Performance", "perf_score": "Score",
                      "run_name": "Experiment Name",
                      "date": "Date",
@@ -202,7 +203,7 @@ class Dashboard_ML_Experiment(Dashboard_Layout_Base):
                 pipeline_table["data"] = pipeline_table["data_sign"]
                 pipeline_table["model"] = pipeline_table["model_sign"]
 
-                pipeline_table = pipeline_table.drop(["perf_name","perf_score","random_state"], axis="columns").astype(str)
+                pipeline_table = pipeline_table.drop(["perf_name","perf_score","random_seed"], axis="columns").astype(str)
 
                 data_unique_table = pipeline_table[["data","data_params"]].copy().drop_duplicates()
                 model_unique_table = pipeline_table[["model", "model_params"]].copy().drop_duplicates()

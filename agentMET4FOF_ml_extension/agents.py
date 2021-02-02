@@ -1,7 +1,7 @@
 import os
 import pickle
 from datetime import datetime
-
+import numpy as np
 from sklearn import datasets
 from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
@@ -11,9 +11,8 @@ from sklearn.gaussian_process.kernels import RBF
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
 
-# from agentMET4FOF.agentMET4FOF.agents import AgentMET4FOF, Coalition
-import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
-from agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
+import agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
+from agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
 
 import pandas as pd
 
@@ -35,6 +34,7 @@ class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
 
     parameter_choices = {"datastream": ["IRIS"], "train_size": [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]}
     parameter_map = {"datastream":{"IRIS":IRIS_Datastream}}
+    stylesheet = "triangle"
 
     def init_parameters(self, random_state=123, datastream="IRIS", train_size=0.8, **data_params):
         datastream = self.parameter_map["datastream"][datastream]
@@ -78,6 +78,7 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
 
     parameter_choices = {"model": ["MinMax", "GP", "MLP"]}
     parameter_map = {"model": {"MinMax": MinMaxScaler, "GP":GaussianProcessClassifier, "MLP":MLPClassifier}}
+    stylesheet = "ellipse"
 
     def init_parameters(self, model=MinMaxScaler, unsupervised=False, **model_params):
         """
@@ -109,19 +110,29 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
         """
         # depending on the channel, we train/test using the message's content.
         channel = message["channel"]
+        # extract meta data if available
+        if isinstance(message["data"], dict) and "metadata" in message["data"].keys():
+            self.metadata = message["data"]["metadata"]
+
         if channel == "train":
             self.fit(message_data=message["data"])
 
         if (channel in ["train","test","simulate"]):
             # run prediction/transformation
             transformed_data = self.transform(message["data"])
+            output_message = {"quantities": transformed_data}
 
-            # send output
+            # determine if target key is available
             target_available = True if "target" in message["data"].keys() else False
             if target_available:
-                self.send_output({"quantities":transformed_data, "target":message["data"]["target"]}, channel=channel)
-            else:
-                self.send_output({"quantities":transformed_data}, channel=channel)
+                output_message.update({"target":message["data"]["target"]})
+
+            # determine if metadata is available
+            if hasattr(self, "metadata"):
+                output_message.update({"metadata":self.metadata})
+
+            # send output
+            self.send_output(output_message, channel=channel)
 
     def fit(self, message_data):
         """
@@ -171,10 +182,63 @@ class ML_EvaluateAgent(agentmet4fof_module.AgentMET4FOF):
             self.upload_result(results)
 
     def upload_result(self, results):
+        
         if self.ml_experiment_proxy is not None:
             for key,val in results.items():
                 self.ml_experiment_proxy.upload_result(results={key:val})
                 self.ml_experiment_proxy.save_result()
+            self.log_info("Saved results")
+
+
+class ML_AggregatorAgent(agentmet4fof_module.AgentMET4FOF):
+    """
+    Syncs and concatenate the data from its Input Agents
+    """
+    parameter_choices = {}
+
+    def init_parameters(self):
+        self.train_size = None
+        self.test_size = None
+
+    def on_received_message(self, message):
+        if self.current_state == "Running":
+            #update buffer with received data from input agent
+            #By default, the AgentBuffer is a FIFO buffer and when new n entries are added to a filled buffer,
+            #n entries from the left of buffer will be automatically removed.
+
+            # store data from input agents as list of 'packets'
+            # hence each index of the list will be used to sync the data entries
+            self.buffer.store(agent_from=message['from'], data=[message['data']])
+
+            buffer_keys = list(self.buffer.keys())
+            input_agent_keys = list(self.Inputs.keys())
+            sync_counter = 0
+            for input_agent in input_agent_keys:
+                if (input_agent in buffer_keys) and (len(self.buffer[input_agent]) >0):
+                    sync_counter += 1
+            if sync_counter == len(input_agent_keys):
+                popped_data = self.buffer.popleft(n=1)
+                print(popped_data)
+                # concatenate the popped data
+
+                # concat_quantities = [popped_data[agent]['quantities'] for agent in popped_data.keys()]
+                output_final = {}
+                concat_quantities = list(popped_data.values())
+                first_entry = concat_quantities[0][0] # {"quantities":[]}
+                if isinstance(first_entry["quantities"], dict):
+                    full_quantities = {key:np.concatenate([quantity[0]["quantities"][key] for quantity in concat_quantities], axis=-1)
+                                       for key in first_entry["quantities"].keys()}
+                else:
+                    full_quantities = np.concatenate([quantity[0]["quantities"] for quantity in concat_quantities], axis=-1)
+                # self.send_output({'quantities':buffer_mean, 'time':buffer_content['time'][-1]})
+                output_final.update({"quantities":full_quantities})
+                if isinstance(first_entry,dict) and ("target" in first_entry.keys()):
+                    full_target = first_entry["target"]
+                    output_final.update({"target": full_target})
+                if isinstance(first_entry, dict) and ("metadata" in first_entry.keys()):
+                    metadata = first_entry["metadata"]
+                    output_final.update({"metadata": metadata})
+                self.send_output(data=output_final, channel=message["channel"])
 
 
 

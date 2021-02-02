@@ -1,8 +1,7 @@
 import pickle
 import os
-from new_ml_experiment import ML_Results
+from .agentMET4FOF_ml_extension.ML_Experiment import ML_Results
 import pandas as pd
-# import matplotlib.pyplot as plt
 
 
 
@@ -35,7 +34,6 @@ def load_ml_exp_details(base_folder = "MLEXP/"):
 
     return ml_details
 
-
 def groupby_results(ml_results_pd, groupby_cols = ["data", "data_params", "model", "model_params"], perf_columns=["perf_score"], reset_index=True):
     groupby_cols = groupby_cols+["perf_name"]
     temp_pd = ml_results_pd.copy()
@@ -48,24 +46,6 @@ def groupby_results(ml_results_pd, groupby_cols = ["data", "data_params", "model
         return temp_pd_mean.reset_index(), temp_pd_sem.reset_index()
     else:
         return temp_pd_mean, temp_pd_sem
-
-ml_results = load_ml_results(base_folder = "MLEXP/")
-ml_exp_details = load_ml_exp_details()
-
-
-ml_results_pd = load_pd_full(base_folder = "MLEXP/")
-
-pd_mean, pd_sem= groupby_results(ml_results_pd, perf_columns=["perf_score"])
-
-# pd.DataFrame(ml_run.results)
-
-
-
-# ml_filtered= filter_results(run_names=[ml_exp_details.run_name[0]], dates=[ml_exp_details.date[0]], base_folder = "MLEXP/")
-
-
-
-
 
 
 

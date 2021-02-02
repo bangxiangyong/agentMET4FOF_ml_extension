@@ -4,8 +4,8 @@ import pickle
 import os
 import pandas as pd
 
-import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
-import agentMET4FOF_ml_extension.agents as ml_agents
+import agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
+import agentMET4FOF_ml_extension.agentMET4FOF_ml_extension.agents as ml_agents
 
 class ML_Results():
     """
@@ -37,7 +37,7 @@ class ML_Experiment(agentmet4fof_module.Coalition):
     It is foreseen that, we will concatenate the list from multiple experiments into a large dataframe of results,
     which we can then compare model performances.
     """
-    def __init__(self, ml_name="simple1", agents=[], random_state=123,base_folder="MLEXP/"):
+    def __init__(self, ml_name="simple1", agents=[], random_seed=123, base_folder="MLEXP/"):
 
         super().__init__(name = ml_name, agents=agents)
         self.base_folder = base_folder
@@ -46,20 +46,24 @@ class ML_Experiment(agentmet4fof_module.Coalition):
         self.run_details = {"run_name": self.ml_name, "date":self.run_date}
         self.results = []
         self.pipeline_ready = False
-        self.random_state = random_state
+        self.random_seed = random_seed
+        self.infer_parameters()
 
     def add_agent(self, agent):
         super().add_agent(agent)
+        self.infer_parameters()
+        print("PIPELINE READY:" +str(self.pipeline_ready))
+
+    def infer_parameters(self):
         datastream_agent, model_agents, evaluate_agent = self.infer_agents(self.agents)
         if (datastream_agent is not None) and (model_agents is not None) and (evaluate_agent is not None):
             self.data_pipeline_params = self.infer_connections(datastream_agent=datastream_agent,
-                                   model_agents=model_agents,
-                                   evaluate_agent=evaluate_agent,
-                                   random_state=self.random_state)
+                                                               model_agents=model_agents,
+                                                               evaluate_agent=evaluate_agent,
+                                                               random_seed=self.random_seed)
             self.pipeline_ready = True
         else:
             self.pipeline_ready = False
-
 
     def infer_agents(self, agents):
         datastream_agent = None
@@ -67,14 +71,14 @@ class ML_Experiment(agentmet4fof_module.Coalition):
         evaluate_agent = None
 
         for agent in agents:
-            if isinstance(agent, ml_agents.ML_DatastreamAgent):
+            if isinstance(agent, ml_agents.ML_DatastreamAgent) or isinstance(agent, ml_agents.ML_AggregatorAgent):
                 datastream_agent = agent
             if isinstance(agent, ml_agents.ML_TransformAgent):
                 if model_agents is None:
                     model_agents = [agent]
                 else:
                     model_agents.append(agent)
-            if isinstance(agent, ml_agents.ML_EvaluateAgent):
+            if isinstance(agent, ml_agents.ML_EvaluateAgent) or issubclass(type(agent), ml_agents.ML_EvaluateAgent):
                 evaluate_agent = agent
         return datastream_agent, model_agents, evaluate_agent
 
@@ -82,13 +86,13 @@ class ML_Experiment(agentmet4fof_module.Coalition):
         """
         Extracts name of class
         """
-        if isinstance(param, str) or isinstance(param, list) or isinstance(param, float) or isinstance(param, float):
+        if isinstance(param, str) or isinstance(param, list) or isinstance(param, float) or isinstance(param, int):
             return param
 
         else:
             return type(param).__name__
 
-    def infer_connections(self, datastream_agent, model_agents, evaluate_agent, random_state=123):
+    def infer_connections(self, datastream_agent, model_agents, evaluate_agent, random_seed=123):
         # handle datastream
         datastream_name = datastream_agent.name
         data_params = {param_key:self.convert_method_to_name(datastream_agent.get_attr(param_key)) for param_key, _ in datastream_agent.parameter_choices.items() if hasattr(datastream_agent,"parameter_choices")}
@@ -106,7 +110,7 @@ class ML_Experiment(agentmet4fof_module.Coalition):
 
         # full data pipeline params
         data_pipeline_params = {"data": datastream_name, "data_params": data_params, "model": model_name,
-                                     "model_params": model_params, "random_state": random_state}
+                                     "model_params": model_params, "random_seed": random_seed}
         return data_pipeline_params
 
     def load_result(self):
