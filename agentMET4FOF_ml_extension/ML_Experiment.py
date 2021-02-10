@@ -157,3 +157,11 @@ class ML_Experiment(agentmet4fof_module.Coalition):
                 new_result_entry.update({"model":model_name})
 
             self.results.append(new_result_entry)
+
+def add_ml_experiment(agentNetwork, name="MLEXP_1", agents=[]):
+    """
+    Instantiates a coalition of agents.
+    """
+    new_ml_exp = ML_Experiment(name, agents)
+    agentNetwork._get_controller().add_coalition(new_ml_exp)
+    return new_ml_exp

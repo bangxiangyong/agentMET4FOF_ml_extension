@@ -10,6 +10,7 @@ from dash.exceptions import PreventUpdate
 from agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.dashboard import LayoutHelper
 import pandas as pd
 
+from .ML_Experiment import add_ml_experiment
 from ..analyse_ml_results import load_ml_exp_details, load_pd_full, groupby_results
 from dash.dependencies import Input, Output, State
 import numpy as np
@@ -88,11 +89,27 @@ class Dashboard_ML_Experiment(Dashboard_Layout_Base):
             #side panel
             html.Div(className="col s4", children=[
                 html.Div(className="card blue lighten-4", children= [
-                    html.Div(className="card-content", children=[
 
-                        html.Span(className="card-title",style={'margin-top': '20px'}, children=[
-                             "ML Experiments"
+                    html.Div(className="card-content", children=[
+                        html.Span(className="card-title", style={'margin-top': '20px'}, children=[
+                            "ML Experiments"
                         ]),
+                        # add button for adding ML Experiment Coalition
+                        html.Div(style={'margin-top': '30px'}, children=[
+                            html.Div(className="input-field", children=[
+                                html.I(className="material-icons prefix", children=["science"]),
+                                dcc.Input(
+                                    id="new-ml-exp-name",
+                                    type="text",
+                                    value="",
+                                    className="validate"
+                                ),
+                                html.Label(children="New ML Experiment", htmlFor="coalition-name")
+                            ]),
+                            LayoutHelper.html_button(icon="add_to_queue", text="Add ML Experiment",
+                                                     id="add-ml-exp-button")
+                        ]),
+                        html.Div(style={'margin-top': '50px'}),
                         LayoutHelper.create_params_table(table_name="experiment-table",
                                                          data=experiments_df,
                                                             editable=True,
@@ -129,11 +146,28 @@ class Dashboard_ML_Experiment(Dashboard_Layout_Base):
 
 
             ]),
+
         ])
 
     def prepare_callbacks(self,app):
         app.ml_experiments = []
         app.aggregated_chain_results ={}
+
+        # Add coalition button click
+        @app.callback([Output('new-ml-exp-name', 'value')],
+                      [Input('add-ml-exp-button', 'n_clicks')],
+                      [State('new-ml-exp-name', 'value'),
+                       ]
+                      )
+        def add_ml_exp_button_click(n_clicks, ml_exp_name):
+            agentNetwork = app.dashboard_ctrl.agentNetwork
+
+            if n_clicks is not None:
+                if ml_exp_name != "":
+                    add_ml_experiment(agentNetwork=agentNetwork, name=ml_exp_name, agents=[])
+                    app.raise_toast("Created new ML Experiment : %s !" % ml_exp_name)
+            return [""]
+
 
         @app.callback(
             [Output('chains-table', "selected_rows"),],
@@ -182,6 +216,7 @@ class Dashboard_ML_Experiment(Dashboard_Layout_Base):
 
                 # create pipeline table which mashes (data-dataparams-trainsize, model-modelparams)
                 pipeline_table = aggregated_chain_results.copy()
+
                 #
                 model_uniques = (pipeline_table["model"].unique())
                 data_uniques = (pipeline_table["data"].unique())
@@ -262,7 +297,6 @@ class Dashboard_ML_Experiment(Dashboard_Layout_Base):
                 model_pipeline_table = []
 
 
-
             return [[data_pipeline_table,model_pipeline_table],chains_table]
 
         def round_sig(x, sig=2):
@@ -273,6 +307,7 @@ class Dashboard_ML_Experiment(Dashboard_Layout_Base):
                     return round(x, sig-int(floor(log10(abs(x))))-1)
             except:
                 return x
+
 
         @app.callback(
             [Output('compare-graph-div', "children")],
