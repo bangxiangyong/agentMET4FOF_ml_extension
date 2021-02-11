@@ -1,3 +1,6 @@
 [submodule "agentMET4FOF"]
 	path = agentMET4FOF
 	url = https://github.com/Met4FoF/agentMET4FOF
+[submodule "baetorch"]
+	path = baetorch
+	url = https://github.com/bangxiangyong/baetorch
