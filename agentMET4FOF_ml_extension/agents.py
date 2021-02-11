@@ -1,25 +1,15 @@
-import os
-import pickle
-from datetime import datetime
 import numpy as np
-from sklearn import datasets
 from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.gaussian_process import GaussianProcessClassifier
-from sklearn.gaussian_process.kernels import RBF
-from sklearn.tree import DecisionTreeClassifier
+
 from sklearn.neural_network import MLPClassifier
 
-import agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
-from agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
+import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
+from baetorch.baetorch.util.seed import bae_set_seed
+from .datastreams import IRIS_Datastream
 
-import pandas as pd
-
-class IRIS_Datastream(DataStreamMET4FOF):
-    def __init__(self):
-        iris = datasets.load_iris()
-        self.set_data_source(quantities=iris.data, target=iris.target)
 
 # Datastream Agent
 class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
@@ -33,22 +23,38 @@ class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
     """
 
     parameter_choices = {"datastream": ["IRIS"], "train_size": [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]}
-    parameter_map = {"datastream":{"IRIS":IRIS_Datastream}}
+    parameter_map = {"datastream":{"IRIS": IRIS_Datastream}}
     stylesheet = "triangle"
 
-    def init_parameters(self, random_state=123, datastream="IRIS", train_size=0.8, **data_params):
+    def init_parameters(self, datastream="IRIS", train_size=0.8, random_state=123, **data_params):
+        self.set_random_state(random_state)
         datastream = self.parameter_map["datastream"][datastream]
         self.datastream = datastream(**data_params)
 
         self.train_size = train_size
-        self.random_state = random_state
+
         x_train, x_test, y_train, y_test = train_test_split(self.datastream.quantities, self.datastream.target,
                                                             train_size=self.train_size,
                                                             random_state=random_state)
+
+        self.set_data_sources(x_train=x_train, x_test=x_test, y_train=y_train, y_test=y_test)
+
+    def set_random_state(self, random_state):
+        self.random_state = random_state
+        bae_set_seed(random_state)
+
+    def set_data_sources(self, x_train=None, x_test=None, x_ood=None, y_train=None, y_test=None, y_ood=None):
+        """
+        Set train, test and OOD for x and y's.
+        x_ood and y_ood are optional.
+        """
+
         self.x_train = x_train
         self.x_test = x_test
         self.y_train = y_train
         self.y_test = y_test
+        self.x_ood = x_ood
+        self.y_ood = y_ood
 
     def agent_loop(self):
         if self.current_state == "Running":
@@ -80,7 +86,7 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
     parameter_map = {"model": {"MinMax": MinMaxScaler, "GP":GaussianProcessClassifier, "MLP":MLPClassifier}}
     stylesheet = "ellipse"
 
-    def init_parameters(self, model=MinMaxScaler, unsupervised=False, **model_params):
+    def init_parameters(self, model=MinMaxScaler, unsupervised=False, random_state=123,  **model_params):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -95,7 +101,7 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
         **model_params : keywords for model parameters instantiation.
         """
         model = self.parameter_map['model'][model]
-
+        self.set_random_state(random_state)
         # assume it as a class model to be initialised
         self.unsupervised = unsupervised
 
@@ -103,6 +109,10 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
             self.model = model(**model_params)
         else:
             self.model = model
+
+    def set_random_state(self, random_state):
+        self.random_state = random_state
+        bae_set_seed(random_state)
 
     def on_received_message(self, message):
         """
@@ -166,7 +176,7 @@ class ML_EvaluateAgent(agentmet4fof_module.AgentMET4FOF):
     parameter_choices = {"evaluate_method": ["f1_score"], "average":["micro"]}
     parameter_map = {"evaluate_method": {"f1_score": f1_score}}
 
-    def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None, **evaluate_params):
+    def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None,  **evaluate_params):
         evaluate_method = self.parameter_map["evaluate_method"][evaluate_method]
 
         self.ml_experiment_proxy = ml_experiment_proxy
