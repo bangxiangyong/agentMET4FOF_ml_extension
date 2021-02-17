@@ -52,6 +52,16 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
         new_dmm_code = self.dmm.encode(datatype=current_code + received_code, return_pickle=False, return_compact=True)
         return new_dmm_code
 
+    def dmm_wrap(self, wrap_method, *args, **kwargs):
+        """
+        Convenient method for wrapping the DMM around a method with self checking on whether the self.use_dmm parameter is used.
+        """
+
+        if self.use_dmm:
+            return self.dmm.wrap(wrap_method, self.dmm_code, *args, **kwargs)
+        else:
+            wrap_method(*args, **kwargs)
+
 class ML_DatastreamAgent(ML_BaseAgent):
     """
     A base class for ML data-streaming agent, which takes into account the train/test split.
@@ -215,10 +225,7 @@ class ML_TransformAgent(ML_BaseAgent):
 
         if channel == "train":
             # wrap fit method with dmm if enabled
-            if self.use_dmm:
-                self.model = self.dmm.wrap(self.fit, self.dmm_code, message["data"])
-            else:
-                self.model = self.fit(message_data=message["data"])
+            self.model = self.dmm_wrap(self.fit, message["data"])
 
             if hasattr(self, "send_train_model") and self.send_train_model:
                 self.send_output({"model":self.model}, channel="trained_model")
@@ -231,10 +238,7 @@ class ML_TransformAgent(ML_BaseAgent):
 
             # run prediction/transformation
             # wrap predictions method with dmm if enabled
-            if self.use_dmm:
-                transformed_data = self.dmm.wrap(self.transform, self.dmm_code, message["data"])
-            else:
-                transformed_data = self.transform(message["data"])
+            transformed_data = self.dmm_wrap(self.transform, message["data"])
 
             output_message = {"quantities": transformed_data}
 

@@ -79,44 +79,50 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
                                                           random_state=random_state,
                                                           use_dmm=use_dmm)
 
+        x_trains, x_tests, y_trains, y_tests= self.dmm_wrap(self.prepare_data)
+
+        self.set_data_sources(x_train = x_trains,
+                              x_test  = x_tests,
+                              y_train = y_trains,
+                              y_test  = y_tests)
+
+    def prepare_data(self):
         x_trains = []
         x_tests = {}
         y_trains = []
         y_tests = {}
 
         # configure training datasets
-        for axis in train_axis:
+        for axis in self.train_axis:
             datastream = ZEMA_DataStream(axis=axis)
             x_train, x_test, y_train, y_test = train_test_split(datastream._quantities, datastream._target,
-                                                                train_size=self.train_size, shuffle=shuffle,
-                                                                random_state=random_state)
+                                                                train_size=self.train_size, shuffle=self.shuffle,
+                                                                random_state=self.random_state)
             x_trains.append(x_train)
             y_trains.append(y_train)
 
-            if axis in test_axis:
+            if axis in self.test_axis:
                 x_tests.update({str(axis): x_test})
                 y_tests.update({str(axis): y_test})
 
         # configure test datasets
-        for axis in test_axis:
+        for axis in self.test_axis:
             datastream = ZEMA_DataStream(axis=axis)
             # if the axis has been specified in train axis,
             # it has been splitted in the block of code before this
             # and included in the x_tests
             # hence, we don't need to add it again to the list
 
-            if axis not in train_axis:
+            if axis not in self.train_axis:
                 x_tests.update({str(axis): datastream._quantities})
                 y_tests.update({str(axis): datastream._target})
 
         # concatenate into numpy array
         x_trains = np.concatenate(x_trains, axis=0)
         y_trains = np.concatenate(y_trains, axis=0)
+        return x_trains, x_tests, y_trains, y_tests
 
-        self.set_data_sources(x_train = x_trains,
-                              x_test  = x_tests,
-                              y_train = y_trains,
-                              y_test  = y_tests)
+
 
     def agent_loop(self):
         if self.current_state == "Running":
