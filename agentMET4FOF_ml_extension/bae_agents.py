@@ -252,7 +252,7 @@ class PropagateTransformAgent(ML_TransformAgent):
         self.single_model = single_model
         self.return_mean = return_mean
 
-        super(PropagateTransformAgent, self).init_parameters(model=model,
+        super(PropagateTransformAgent, self).init_parameters(model=None,
                                                              random_state=random_state,
                                                              predict_train=predict_train,
                                                              send_train_model=send_train_model,
@@ -276,7 +276,7 @@ class PropagateTransformAgent(ML_TransformAgent):
                                                 model_params=self.model_params,
                                                 num_samples=self.num_samples)
         else:
-            self.model = self.instantiate_model(models=self.model_class,
+            self.model = self.instantiate_model(model=self.model_class,
                                                 model_params=self.model_params)
 
         # if the model is a list i.e not a single_model
@@ -365,7 +365,7 @@ class PropagateInverseTransformAgent(PropagateTransformAgent):
             return transformed_data
 
 
-class PropagatePipelineAgent(PropagateTransformAgent, ML_TransformPipelineAgent):
+class PropagatePipelineAgent(PropagateTransformAgent):
     """
     This agent expects to receive reconstructed samples from the BAE Agent, and apply fit_transform on every sample.
 
@@ -373,7 +373,12 @@ class PropagatePipelineAgent(PropagateTransformAgent, ML_TransformPipelineAgent)
     """
 
     def init_parameters(self, models=[], model_params=[],
-                        num_samples=5, propagate_key = "y_pred", predict_train = False, send_train_model=False, use_dmm=False, random_state=123):
+                        propagate_key = "y_pred",
+                        single_model = False,
+                        predict_train = False,
+                        send_train_model=False,
+                        use_dmm=False,
+                        random_state=123):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -400,7 +405,10 @@ class PropagatePipelineAgent(PropagateTransformAgent, ML_TransformPipelineAgent)
                                                             use_dmm=use_dmm)
 
 
-
+    def instantiate_model(self, models, model_params={}):
+        new_model = make_pipeline(*[model(**model_param) for model, model_param in zip(models, model_params)])
+        return new_model
+    
     def instantiate_models(self, model, model_params={}, num_samples=5):
         model = [self.instantiate_model(model,model_params) for sample in range(num_samples)]
         return model

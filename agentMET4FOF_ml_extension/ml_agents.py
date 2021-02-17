@@ -52,15 +52,15 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
         new_dmm_code = self.dmm.encode(datatype=current_code + received_code, return_pickle=False, return_compact=True)
         return new_dmm_code
 
-    def dmm_wrap(self, wrap_method, *args, **kwargs):
+    def dmm_wrap(self, wrap_method, additional_id="", *args, **kwargs):
         """
         Convenient method for wrapping the DMM around a method with self checking on whether the self.use_dmm parameter is used.
         """
 
         if self.use_dmm:
-            return self.dmm.wrap(wrap_method, self.dmm_code, *args, **kwargs)
+            return self.dmm.wrap(wrap_method, additional_id+self.dmm_code, *args, **kwargs)
         else:
-            wrap_method(*args, **kwargs)
+            return wrap_method(*args, **kwargs)
 
 class ML_DatastreamAgent(ML_BaseAgent):
     """
@@ -189,14 +189,14 @@ class ML_TransformAgent(ML_BaseAgent):
         self.init_dmm(use_dmm)
 
         if model is not None:
-            self.model = self.instantiate_model(model, model_params)
+            self.forward_model = self.instantiate_model(model, model_params)
 
     def instantiate_model(self, model, model_params={}):
         # instantiate the model if it is a class
         if inspect.isclass(model):
             new_model = model(**model_params)
         # assume it as a function
-        elif inspect.ismethod(model):
+        elif inspect.isfunction(model) or inspect.ismethod(model):
             new_model = functools.partial(model, **model_params)
         # it is an already instantiated model
         else:
@@ -218,17 +218,17 @@ class ML_TransformAgent(ML_BaseAgent):
         if channel == "dmm_code" and self.use_dmm:
             # self.dmm_code = self.dmm_code+message["data"]
             self.dmm_code = self.mix_dmm_code(self.dmm_code, message["data"])
-            self.send_output(self.dmm_code, channel="dmm_code")
+            self.send_dmm_code()
 
         if channel == "trained_model":
-            self.model = message["data"]["model"]
+            self.forward_model = message["data"]["model"]
 
         if channel == "train":
             # wrap fit method with dmm if enabled
-            self.model = self.dmm_wrap(self.fit, message["data"])
+            self.forward_model = self.dmm_wrap(self.fit, message_data=message["data"], additional_id=channel)
 
             if hasattr(self, "send_train_model") and self.send_train_model:
-                self.send_output({"model":self.model}, channel="trained_model")
+                self.send_output({"model":self.forward_model}, channel="trained_model")
 
         if (channel in ["train","test","simulate"]):
             # do not proceed to applying predict on train data
@@ -238,7 +238,7 @@ class ML_TransformAgent(ML_BaseAgent):
 
             # run prediction/transformation
             # wrap predictions method with dmm if enabled
-            transformed_data = self.dmm_wrap(self.transform, message["data"])
+            transformed_data = self.dmm_wrap(self.transform, message_data=message["data"], additional_id=channel)
 
             output_message = {"quantities": transformed_data}
 
@@ -258,10 +258,10 @@ class ML_TransformAgent(ML_BaseAgent):
         """
         Fits self.model on message_data["quantities"]
         """
-        if hasattr(self.model, "fit"):
+        if hasattr(self.forward_model, "fit"):
             print("FITTING:"+str(self.name))
-            self.model.fit(message_data["quantities"], message_data["target"])
-        return self.model
+            self.forward_model.fit(message_data["quantities"], message_data["target"])
+        return self.forward_model
 
     def transform(self, message_data):
         """
@@ -281,12 +281,12 @@ class ML_TransformAgent(ML_BaseAgent):
         Internal function. Transforms and returns message_data["quantities"] using self.model
         """
 
-        if hasattr(self.model, "transform"):
-            transformed_data = self.model.transform(message_data)
-        elif hasattr(self.model, "predict"):
-            transformed_data = self.model.predict(message_data)
+        if hasattr(self.forward_model, "transform"):
+            transformed_data = self.forward_model.transform(message_data)
+        elif hasattr(self.forward_model, "predict"):
+            transformed_data = self.forward_model.predict(message_data)
         else:
-            transformed_data = self.model(message_data)
+            transformed_data = self.forward_model(message_data)
 
         return transformed_data
 
@@ -295,8 +295,8 @@ class ML_InverseTransformAgent(ML_BaseAgent):
         """
         Internal function. Inverse transforms and returns message_data["quantities"] using self.model
         """
-        if hasattr(self.model, "inverse_transform"):
-            transformed_data = self.model.inverse_transform(message_data)
+        if hasattr(self.forward_model, "inverse_transform"):
+            transformed_data = self.forward_model.inverse_transform(message_data)
 
         return transformed_data
 

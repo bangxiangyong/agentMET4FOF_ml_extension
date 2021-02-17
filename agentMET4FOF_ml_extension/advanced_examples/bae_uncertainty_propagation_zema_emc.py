@@ -27,6 +27,7 @@ def move_axis(x, first_axis=1,second_axis=2):
 
 def main():
     random_state = 123
+    use_dmm = True
     # start agent network server
     agentNetwork = AgentNetwork(log_filename=False, backend="mesa")
 
@@ -36,7 +37,7 @@ def main():
                                               test_axis=[3,5,7],
                                               train_size=0.8,
                                               random_state=random_state,
-                                              move_axis=False,
+                                              use_dmm=use_dmm,
                                               shuffle=True)
 
     pre_moveaxis_agent = agentNetwork.add_agent(name="Pre-MoveXis", agentType=ML_TransformAgent, model=move_axis, predict_train=True)
@@ -60,12 +61,15 @@ def main():
                                         return_samples = True,
                                         )
 
-    post_minmax_agent = agentNetwork.add_agent(name="Post-InverseMinMax", agentType=PropagateInverseTransformAgent, model=MultiMinMaxScaler, num_samples=1, return_mean=False, first_axis=2, second_axis=3)
-    post_moveaxis_agent = agentNetwork.add_agent(name="Post-MoveXis", agentType=PropagateTransformAgent, model=move_axis, num_samples=1, return_mean=False, first_axis=2, second_axis=3)
+    post_minmax_agent = agentNetwork.add_agent(name="Post-InverseMinMax", agentType=PropagateInverseTransformAgent, model=MultiMinMaxScaler, single_model=True, return_mean=False, first_axis=2, second_axis=3, use_dmm=use_dmm)
+    post_moveaxis_agent = agentNetwork.add_agent(name="Post-MoveXis", agentType=PropagateTransformAgent,
+                                                 model=move_axis, single_model=True, use_dmm=use_dmm,
+                                                 return_mean=False, first_axis=2,
+                                                 second_axis=3)
 
     propagate_pipeline_agent = agentNetwork.add_agent(name="Supervised-Pipeline", agentType=PropagatePipelineAgent, random_state=random_state,
-                                                      models=[FFT_BFC, Pearson_FeatureSelection, BayesianRidge], num_samples=2,
-                                                      model_params=[{},{},{}]
+                                                      models=[FFT_BFC, Pearson_FeatureSelection, BayesianRidge], single_model=False,
+                                                      model_params=[{},{},{}], use_dmm=use_dmm,
                                                       )
 
     # propagate_pipeline_agent = agentNetwork.add_agent(name="Supervised-Pipeline", agentType=ML_TransformPipelineAgent, random_state=random_state,
@@ -73,30 +77,30 @@ def main():
     #                                                   model_params=[{},{},{}]
     #                                                   )
 
-    postproc_agent = agentNetwork.add_agent(name="Clipping-0-100",agentType=ML_TransformAgent, model= clip01)
+    postproc_agent = agentNetwork.add_agent(name="Clipping-0-100",agentType=ML_TransformAgent, model= clip01,use_dmm=use_dmm)
     evaluator_agent = agentNetwork.add_agent(agentType=ML_EvaluateAgent, evaluate_method="rmse")
     monitor_agent = agentNetwork.add_agent(agentType=MonitorAgent)
 
     # connect fft agent to cbae agent
 
     #==========CBAE COALITION============
-    datastream_agent.bind_output(pre_moveaxis_agent, channel=["train","test"])
-    pre_moveaxis_agent.bind_output(pre_minmax_agent, channel=["train", "test"])
-    pre_minmax_agent.bind_output(cbae_agent, channel=["train", "test"])
-    pre_minmax_agent.bind_output(post_minmax_agent, channel=["trained_model"])
+    datastream_agent.bind_output(pre_moveaxis_agent, channel=["train","test","dmm_code"])
+    pre_moveaxis_agent.bind_output(pre_minmax_agent, channel=["train", "test","dmm_code"])
+    pre_minmax_agent.bind_output(cbae_agent, channel=["train", "test","dmm_code"])
+    pre_minmax_agent.bind_output(post_minmax_agent, channel=["trained_model","dmm_code"])
 
     # without min max inverse
-    cbae_agent.bind_output(post_moveaxis_agent, channel=["train", "test"])
+    cbae_agent.bind_output(post_moveaxis_agent, channel=["train", "test","dmm_code"])
 
     # with min max inverse
-    # cbae_agent.bind_output(post_minmax_agent, channel=["train","test"])
-    # post_minmax_agent.bind_output(post_moveaxis_agent, channel=["train", "test"])
+    # cbae_agent.bind_output(post_minmax_agent, channel=["train","test","dmm_code"])
+    # post_minmax_agent.bind_output(post_moveaxis_agent, channel=["train", "test","dmm_code"])
 
-    post_moveaxis_agent.bind_output(propagate_pipeline_agent, channel=["train", "test"])
+    post_moveaxis_agent.bind_output(propagate_pipeline_agent, channel=["train", "test","dmm_code"])
 
     # =========SUPERVISED PIPELINE===========
     # datastream_agent.bind_output(propagate_pipeline_agent,channel=["train","test"]) # without BAE
-    propagate_pipeline_agent.bind_output(postproc_agent, channel="test")
+    propagate_pipeline_agent.bind_output(postproc_agent, channel=["test","dmm_code"])
     postproc_agent.bind_output(evaluator_agent, channel="test")
     evaluator_agent.bind_output(monitor_agent, channel="plot")
 
