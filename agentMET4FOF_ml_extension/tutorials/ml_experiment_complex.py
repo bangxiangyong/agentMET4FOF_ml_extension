@@ -11,7 +11,7 @@ from agentMET4FOF.agents import AgentNetwork, MonitorAgent
 
 from agentMET4FOF_ml_extension.Dashboard_ml_exp import Dashboard_ML_Experiment
 from agentMET4FOF_ml_extension.ML_Experiment import ML_Experiment
-from agentMET4FOF_ml_extension.agents import AgentPipeline, ML_DataStreamAgent, ML_EvaluatorAgent
+from agentMET4FOF_ml_extension.ml_agents import AgentPipeline, ML_DataStreamAgent, ML_EvaluatorAgent
 
 from sklearn import datasets
 from sklearn.metrics import f1_score

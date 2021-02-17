@@ -18,6 +18,11 @@ class IRIS_Datastream(DataStreamMET4FOF):
         iris = datasets.load_iris()
         self.set_data_source(quantities=iris.data, target=iris.target)
 
+class BOSTON_Datastream(DataStreamMET4FOF):
+    def __init__(self):
+        boston = datasets.load_boston()
+        self.set_data_source(quantities=boston.data, target=boston.target)
+
 class ZEMA_DataStream(DataStreamMET4FOF):
     url = ""
     path = ""

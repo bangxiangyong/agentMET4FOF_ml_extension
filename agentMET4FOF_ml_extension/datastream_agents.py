@@ -1,7 +1,7 @@
 from sklearn.model_selection import train_test_split
 
 from agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
-from agentMET4FOF_ml_extension.agents import ML_DatastreamAgent
+from agentMET4FOF_ml_extension.ml_agents import ML_DatastreamAgent
 from agentMET4FOF_ml_extension.datastreams import Liveline_DataStream, ZEMA_DataStream
 import numpy as np
 
@@ -58,62 +58,66 @@ class Liveline_DatastreamAgent(ML_DatastreamAgent):
 class ZEMA_DatastreamAgent(ML_DatastreamAgent):
     parameter_choices = {"axis":[3,5,7], "train_size":[0.5,0.6,0.7,0.8,0.9]}
 
-    def init_parameters(self, id_axis=[3], ood_axis=[3], train_size=0.8, random_state=123, shuffle=True, **data_params):
+    def init_parameters(self, train_axis=[3], test_axis=[], train_size=0.8, random_state=123, shuffle=True, move_axis=True, **data_params):
+        """
+        x_train : numpy array of sensor data
+        x_test : list of numpy arrays for each axis specified in test_axis
 
+        """
         self.set_random_state(random_state)
         self.train_size = train_size
         self.shuffle = shuffle
 
         x_trains = []
-        x_tests = []
+        x_tests = {}
         y_trains = []
-        y_tests = []
-        x_oods =[]
-        y_oods =[]
+        y_tests = {}
 
-        # configure id datasets
-        for axis in id_axis:
+        # configure training datasets
+        for axis in train_axis:
             datastream = ZEMA_DataStream(axis=axis)
             x_train, x_test, y_train, y_test = train_test_split(datastream._quantities, datastream._target,
                                                                 train_size=self.train_size, shuffle=shuffle,
                                                                 random_state=random_state)
             x_trains.append(x_train)
-            x_tests.append(x_test)
             y_trains.append(y_train)
-            y_tests.append(y_test)
 
-        # configure ood datasets
-        for axis in ood_axis:
+            if axis in test_axis:
+                x_tests.update({str(axis): x_test})
+                y_tests.update({str(axis): y_test})
+
+        # configure test datasets
+        for axis in test_axis:
             datastream = ZEMA_DataStream(axis=axis)
+            # if the axis has been specified in train axis,
+            # it has been splitted in the block of code before this
+            # and included in the x_tests
+            # hence, we don't need to add it again to the list
 
-            x_oods.append(datastream._quantities)
-            y_oods.append(datastream._target)
+            if axis not in train_axis:
+                x_tests.update({str(axis): datastream._quantities})
+                y_tests.update({str(axis): datastream._target})
 
         # concatenate into numpy array
         x_trains = np.concatenate(x_trains, axis=0)
-        x_tests = np.concatenate(x_tests, axis=0)
         y_trains = np.concatenate(y_trains, axis=0)
-        y_tests = np.concatenate(y_tests, axis=0)
 
-        if len(ood_axis) > 0:
-            x_oods =np.concatenate(x_oods, axis=0)
-            y_oods =np.concatenate(y_oods, axis=0)
-        else:
-            x_oods = None
-            y_oods = None
+        # move axis
+        if move_axis:
+            x_trains = np.moveaxis(x_trains, 1, 2)
+            x_tests = np.moveaxis(x_tests, 1, 2)
 
-        self.set_data_sources(x_train=x_trains,
-                              x_test=x_tests,
-                              x_ood=x_oods,
-                              y_train=y_trains,
-                              y_test= y_tests,
-                              y_ood=y_oods)
+        self.set_data_sources(x_train = x_trains,
+                              x_test  = x_tests,
+                              y_train = y_trains,
+                              y_test  = y_tests)
 
     def agent_loop(self):
         if self.current_state == "Running":
             self.send_output({"quantities":self.x_train, "target":self.y_train},channel="train")
-            self.send_output({"quantities":{"test":self.x_test,"ood":self.x_ood},
-                              "target":{"test":self.y_test,"ood":self.y_ood}},
-                             channel="test")
+            if len(self.x_test) > 0:
+                self.send_output({"quantities":self.x_test,
+                                  "target":self.y_test},
+                                 channel="test")
 
-
+            self.current_state = "Idle"

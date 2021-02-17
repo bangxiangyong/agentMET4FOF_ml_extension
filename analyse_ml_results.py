@@ -1,8 +1,6 @@
-import pickle
 import os
-from .agentMET4FOF_ml_extension.ML_Experiment import ML_Results
+import pickle
 import pandas as pd
-
 
 
 def load_ml_results(base_folder = "MLEXP/"):

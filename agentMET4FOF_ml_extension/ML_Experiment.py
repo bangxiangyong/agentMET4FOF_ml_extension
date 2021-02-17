@@ -4,8 +4,8 @@ import pickle
 import os
 import pandas as pd
 
-import agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
-import agentMET4FOF_ml_extension.agentMET4FOF_ml_extension.agents as ml_agents
+import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
+import agentMET4FOF_ml_extension.ml_agents as ml_agents
 
 class ML_Results():
     """

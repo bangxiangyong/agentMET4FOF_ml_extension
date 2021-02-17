@@ -7,15 +7,15 @@ import dash_html_components as html
 import dash_core_components as dcc
 import dash_table
 from dash.exceptions import PreventUpdate
-from agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.dashboard import LayoutHelper
+from agentMET4FOF.agentMET4FOF.dashboard import LayoutHelper
 import pandas as pd
 
 from .ML_Experiment import add_ml_experiment
-from ..analyse_ml_results import load_ml_exp_details, load_pd_full, groupby_results
+from analyse_ml_results import load_ml_exp_details, load_pd_full, groupby_results
 from dash.dependencies import Input, Output, State
 import numpy as np
 from math import log10, floor
-from agentMET4FOF_ml_extension.agentMET4FOF.agentMET4FOF.dashboard.Dashboard_layout_base import Dashboard_Layout_Base
+from agentMET4FOF.agentMET4FOF.dashboard.Dashboard_layout_base import Dashboard_Layout_Base
 
 column_rename_map = {"data": "Datastream Agents", "model": "Model Agents",
                      "random_state": "Random Seed",

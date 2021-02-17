@@ -1,4 +1,4 @@
-import agentMET4FOF_ml_extension.agents as ml_agents
+import agentMET4FOF_ml_extension.ml_agents as ml_agents
 from agentMET4FOF.agentMET4FOF.agents import AgentNetwork
 from agentMET4FOF_ml_extension.Dashboard_ml_exp import Dashboard_ML_Experiment
 

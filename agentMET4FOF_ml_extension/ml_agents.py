@@ -1,6 +1,7 @@
 import numpy as np
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, mean_squared_error
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.gaussian_process import GaussianProcessClassifier
 
@@ -8,10 +9,13 @@ from sklearn.neural_network import MLPClassifier
 
 import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
 from baetorch.baetorch.util.seed import bae_set_seed
-from .datastreams import IRIS_Datastream
-
+from .datastreams import IRIS_Datastream, BOSTON_Datastream
+import inspect
 
 # Datastream Agent
+from .util.calc_auroc import calc_all_scores
+
+
 class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
     """
     A base class for ML data-streaming agent, which takes into account the train/test split.
@@ -22,8 +26,8 @@ class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
     3) Output form : {"quantities": iterable, "target": iterable}
     """
 
-    parameter_choices = {"datastream": ["IRIS"], "train_size": [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]}
-    parameter_map = {"datastream":{"IRIS": IRIS_Datastream}}
+    parameter_choices = {"datastream": ["IRIS", "BOSTON"], "train_size": [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]}
+    parameter_map = {"datastream":{"IRIS": IRIS_Datastream, "BOSTON":BOSTON_Datastream}}
     stylesheet = "triangle"
 
     def init_parameters(self, datastream="IRIS", train_size=0.8, random_state=123, **data_params):
@@ -33,7 +37,7 @@ class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
 
         self.train_size = train_size
 
-        x_train, x_test, y_train, y_test = train_test_split(self.datastream.quantities, self.datastream.target,
+        x_train, x_test, y_train, y_test = train_test_split(self.datastream._quantities, self.datastream._target,
                                                             train_size=self.train_size,
                                                             random_state=random_state)
 
@@ -86,7 +90,7 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
     parameter_map = {"model": {"MinMax": MinMaxScaler, "GP":GaussianProcessClassifier, "MLP":MLPClassifier}}
     stylesheet = "ellipse"
 
-    def init_parameters(self, model=MinMaxScaler, unsupervised=False, random_state=123,  **model_params):
+    def init_parameters(self, model=MLPClassifier, supervised = False, random_state=123,  **model_params):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -100,15 +104,24 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
 
         **model_params : keywords for model parameters instantiation.
         """
-        model = self.parameter_map['model'][model]
+
+        if isinstance(model,str):
+            model = self.parameter_map['model'][model]
+
         self.set_random_state(random_state)
         # assume it as a class model to be initialised
-        self.unsupervised = unsupervised
+        self.unsupervised = not supervised
+        self.model_params = model_params
+        self.model = self.instantiate_model(model, model_params)
 
-        if hasattr(model, "fit"):
-            self.model = model(**model_params)
+    def instantiate_model(self, model, model_params):
+        # instantiate the model if it is a class
+        if hasattr(model, "fit") or inspect.isclass(model):
+            new_model = model(**model_params)
         else:
-            self.model = model
+            new_model = model
+
+        return new_model
 
     def set_random_state(self, random_state):
         self.random_state = random_state
@@ -149,55 +162,122 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
         Fits self.model on message_data["quantities"]
         """
         if hasattr(self.model, "fit"):
-            if self.unsupervised:
-                self.model.fit(message_data["quantities"])
-            else:
-                self.model.fit(message_data["quantities"], message_data["target"])
+            print("FITTING:"+str(self.name))
+            self.model.fit(message_data["quantities"], message_data["target"])
 
     def transform(self, message_data):
         """
         Transforms and returns message_data["quantities"] using self.model
+        If "quantities" is a dict, we apply _transform on every key-val pair
+        """
+
+        if isinstance(message_data["quantities"], dict):
+            transformed_data = {key:self._transform(val) for key, val in message_data["quantities"].items()}
+        else:
+            transformed_data = self._transform(message_data["quantities"])
+
+        return transformed_data
+
+    def _transform(self, message_data):
+        """
+        Internal function. Transforms and returns message_data["quantities"] using self.model
         """
 
         if hasattr(self.model, "transform"):
-            transformed_data = self.model.transform(message_data["quantities"])
+            transformed_data = self.model.transform(message_data)
         elif hasattr(self.model, "predict"):
-            transformed_data = self.model.predict(message_data["quantities"])
+            transformed_data = self.model.predict(message_data)
         else:
-            transformed_data = self.model(message_data["quantities"])
+            transformed_data = self.model(message_data)
+
         return transformed_data
+
+class ML_TransformPipelineAgent(ML_TransformAgent):
+    """
+    Transformer which applies sklearn pipeline style, by combining multiple models in a serial way.
+
+    Need to pass 3 lists: models, superviseds and model params corresponding to the models
+    """
+
+    stylesheet = "ellipse"
+
+    def init_parameters(self, models=[MLPClassifier], superviseds = [False], model_params=[], random_state=123):
+        """
+        Initialise model parameters.
+        Accepts either a class or a function as model.
+        Stores the instantiated model in self.model.
+
+        Parameters
+        ----------
+        model : class or function
+
+        unsupervised : Boolean. Special keyword for handling fitting to 'target' in the self.fit function
+
+        **model_params : keywords for model parameters instantiation.
+        """
+
+        self.set_random_state(random_state)
+        # assume it as a class model to be initialised
+
+        self.model = make_pipeline(*[model(**model_param) for model,model_param in zip(models,model_params)])
+
 
 class ML_EvaluateAgent(agentmet4fof_module.AgentMET4FOF):
     """
     Last piece in the ML-Pipeline to evaluate the model's performance on the datastream.
 
     If ml_experiment_proxy is specified, this agent will save the results upon finishing.
+
+    Use this in the conventional supervised sense.
     """
-    parameter_choices = {"evaluate_method": ["f1_score"], "average":["micro"]}
-    parameter_map = {"evaluate_method": {"f1_score": f1_score}}
+    parameter_choices = {"evaluate_method": ["f1_score", "rmse"], "average":["micro"]}
+    parameter_map = {"evaluate_method": {"f1_score": f1_score, "rmse":mean_squared_error}}
 
-    def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None,  **evaluate_params):
-        evaluate_method = self.parameter_map["evaluate_method"][evaluate_method]
 
+    def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None, send_plot=True,  **evaluate_params):
+        evaluate_method_ = self.parameter_map["evaluate_method"][evaluate_method]
+        self.evaluate_method = evaluate_method
         self.ml_experiment_proxy = ml_experiment_proxy
 
-        self.evaluate_methods = [evaluate_method]
+        self.evaluate_methods = [evaluate_method_]
         self.evaluate_params = [evaluate_params]
 
     def on_received_message(self, message):
         if message["channel"] == "test":
-            results = {evaluate_method.__name__:evaluate_method(message["data"]["target"], message["data"]["quantities"], **evaluate_param)
+            y_true = message["data"]["target"]
+            y_pred = message["data"]["quantities"]
+
+            results = {evaluate_method.__name__:evaluate_method(y_true, y_pred, **evaluate_param)
                        for evaluate_method,evaluate_param in zip(self.evaluate_methods,self.evaluate_params)}
             self.log_info(str(results))
             self.upload_result(results)
 
+            # regression
+            if self.evaluate_method == "rmse":
+                graph_comparison = self.plot_comparison(y_true, y_pred,
+                                                        from_agent=message['from'],
+                                                        sum_performance="RMSE: " + str(results['mean_squared_error']))
+                self.send_plot(graph_comparison)
+
     def upload_result(self, results):
-        
         if self.ml_experiment_proxy is not None:
             for key,val in results.items():
                 self.ml_experiment_proxy.upload_result(results={key:val})
                 self.ml_experiment_proxy.save_result()
             self.log_info("Saved results")
+
+    def plot_comparison(self, y_true, y_pred, from_agent = "", sum_performance= ""):
+
+        import matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use("Agg")
+        fig, ax = plt.subplots()
+        ax.scatter(y_true,y_pred)
+        fig.suptitle("Prediction vs True Label: " + from_agent)
+        ax.set_title(sum_performance)
+        ax.set_xlabel("Y True")
+        ax.set_ylabel("Y Pred")
+        return fig
 
 
 class ML_AggregatorAgent(agentmet4fof_module.AgentMET4FOF):
@@ -250,11 +330,58 @@ class ML_AggregatorAgent(agentmet4fof_module.AgentMET4FOF):
                     output_final.update({"metadata": metadata})
                 self.send_output(data=output_final, channel=message["channel"])
 
+class OOD_EvaluateAgent(ML_EvaluateAgent):
+    """
+    Last piece in the ML-Pipeline to evaluate the model's performance on the datastream.
+    If ml_experiment_proxy is specified, this agent will save the results upon finishing.
 
+    """
+    parameter_choices = {}
 
+    def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None, **evaluate_params):
+        self.ml_experiment_proxy = ml_experiment_proxy
 
+    def on_received_message(self, message):
 
+        if message["channel"] == "test":
+            message_data_quantities = message["data"]["quantities"]
+            nll_test_mu = message_data_quantities["test"]["nll_mu"]
+            nll_test_var = message_data_quantities["test"]["nll_var"]
+            y_test_var = message_data_quantities["test"]["y_var"]
+            enc_test_var = message_data_quantities["test"]["enc_var"]
 
+            nll_ood_mu = message_data_quantities["ood"]["nll_mu"]
+            nll_ood_var = message_data_quantities["ood"]["nll_var"]
+            y_ood_var = message_data_quantities["ood"]["y_var"]
+            enc_ood_var = message_data_quantities["ood"]["enc_var"]
 
+            max_magnitude = 1000000
+            auroc_score_nllmu, gmean_nllmu, aps_nllmu, tpr_new_nllmu, fpr_new_nllmu = calc_all_scores(nll_test_mu.mean(-1), nll_ood_mu.mean(-1))
+            auroc_score_nllvar, gmean_nllvar, aps_nllvar, tpr_new_nllvar, fpr_new_nllvar = calc_all_scores(
+                np.clip(nll_test_var.mean(-1), -max_magnitude, max_magnitude),
+                np.clip(nll_ood_var.mean(-1), -max_magnitude, max_magnitude))
+            auroc_score_yvar, gmean_yvar, aps_yvar, tpr_new_yvar, fpr_new_yvar = calc_all_scores(
+                np.clip(y_test_var.mean(-1), -max_magnitude, max_magnitude),
+                np.clip(y_ood_var.mean(-1), -max_magnitude, max_magnitude))
+            auroc_score_enc_var, gmean_enc_var, aps_enc_var, tpr_new_enc_var, fpr_new_enc_var = calc_all_scores(
+                np.sum(enc_test_var[1], -1), np.sum(enc_ood_var[1], -1))
 
+            score_nll_mu = {"auroc": auroc_score_nllmu, "gmean": gmean_nllmu, "aps": aps_nllmu,
+                            "tpr": tpr_new_nllmu, "fpr": fpr_new_nllmu}
+            score_nll_var = {"auroc": auroc_score_nllvar, "gmean": gmean_nllvar, "aps": aps_nllvar,
+                             "tpr": tpr_new_nllvar, "fpr": fpr_new_nllvar}
+            score_y_var = {"auroc": auroc_score_yvar, "gmean": gmean_yvar, "aps": aps_yvar, "tpr": tpr_new_yvar,
+                           "fpr": fpr_new_yvar}
+            score_enc_var = {"auroc": auroc_score_enc_var, "gmean": gmean_enc_var, "aps": aps_enc_var,
+                             "tpr": tpr_new_enc_var, "fpr": fpr_new_enc_var}
 
+            score_nll_mu = {key+"-nll-mu":val for key,val in score_nll_mu.items()}
+            score_nll_var = {key + "-nll-var": val for key, val in score_nll_var.items()}
+            score_y_var = {key + "-y-var": val for key, val in score_y_var.items()}
+            score_enc_var = {key + "-enc-var": val for key, val in score_enc_var.items()}
+            results ={}
+            for result in [score_nll_mu,score_nll_var, score_y_var, score_enc_var]:
+                results.update(result)
+
+            self.log_info(str(results))
+            self.upload_result(results)
