@@ -22,31 +22,32 @@ matplotlib.use('Agg') # https://stackoverflow.com/questions/27147300/matplotlib-
 
 def main():
     random_state = 123
+    use_dmm= True
+
     # start agent network server
     agentNetwork = AgentNetwork(log_filename=False, backend="mesa")
 
     # init agents by adding into the agent network
     datastream_agent = agentNetwork.add_agent(agentType=ZEMA_DatastreamAgent,
-                                              train_axis=[3,7],
+                                              train_axis=[3],
                                               test_axis=[3,5,7],
                                               train_size=0.8,
                                               random_state=random_state,
-                                              move_axis=False,
                                               shuffle=True)
 
     pipeline_agent = agentNetwork.add_agent(name="Supervised-Pipeline", agentType=ML_TransformPipelineAgent, random_state=random_state,
                                                       models=[FFT_BFC, Pearson_FeatureSelection, RandomForestRegressor],
-                                                      model_params=[{},{},{}]
+                                                      model_params=[{},{},{}], use_dmm=use_dmm
                                                       )
 
-    postproc_agent = agentNetwork.add_agent(name="Clipping-0-100",agentType=ML_TransformAgent, model= clip01)
+    postproc_agent = agentNetwork.add_agent(name="Clipping-0-100",agentType=ML_TransformAgent, model= clip01, use_dmm=use_dmm)
     evaluator_agent = agentNetwork.add_agent(agentType=ML_EvaluateAgent, evaluate_method="rmse")
     monitor_agent = agentNetwork.add_agent(agentType=MonitorAgent)
 
     # =========SUPERVISED PIPELINE===========
-    datastream_agent.bind_output(pipeline_agent,channel=["train","test"]) # without BAE
-    pipeline_agent.bind_output(postproc_agent, channel="test")
-    postproc_agent.bind_output(evaluator_agent, channel="test")
+    datastream_agent.bind_output(pipeline_agent,channel=["train","test","dmm_code"]) # without BAE
+    pipeline_agent.bind_output(postproc_agent, channel=["test","dmm_code"])
+    postproc_agent.bind_output(evaluator_agent, channel=["test"])
     evaluator_agent.bind_output(monitor_agent, channel="plot")
 
     # connect evaluate agent to cbae

@@ -109,10 +109,11 @@ class CBAE_Agent(ML_TransformAgent):
 
         # fit BAEs
         if not self.use_dmm:
-                self._fit(x_train, random_state=self.random_state)
+                self.bae_model = self._fit(x_train, random_state=self.random_state)
         else:
             for i in range(self.dmm_samples):
                 self.bae_model = self.dmm.wrap(self._fit,"cbae_fit"+str(self.model_params), x_train, random_state=self.random_state+i)
+        return self.bae_model
 
     def _fit(self, x_train, random_state=900):
         bae_set_seed(random_state)
@@ -231,41 +232,67 @@ class CBAE_Agent(ML_TransformAgent):
 
 class PropagateTransformAgent(ML_TransformAgent):
     """
-    This agent expects to receive reconstructed samples from the BAE Agent, and apply fit_transform on every sample.
+    This agent expects to receive predictive samples (first dimension is dimension for BAE samples) from the BAE Agent, and apply fit_transform on every sample.
 
     In effect, we are constructing an ensemble of pipelines from the samples of BAE prediction.
+    Note: the actual instantiation is done during fitting only to dynamically match the number of BAE samples sent in the `train` channel.
+
     """
 
     def init_parameters(self, model=MultiMinMaxScaler, random_state=123, predict_train=True,
-                        send_train_model=False,
-                        num_samples =5, propagate_key="y_pred",
+                        send_train_model=False, use_dmm=False,
+                        single_model = False, propagate_key="y_pred",
                         return_mean=False,
                         **model_params):
+        # create N models
+        self.model_class = model
+        self.model_params = model_params
+
+        self.propagate_key = propagate_key
+        self.single_model = single_model
+        self.return_mean = return_mean
+
         super(PropagateTransformAgent, self).init_parameters(model=model,
                                                              random_state=random_state,
                                                              predict_train=predict_train,
                                                              send_train_model=send_train_model,
-
+                                                             use_dmm=use_dmm
                                                              )
-        self.propagate_key = propagate_key
-        self.num_samples = num_samples
-        self.return_mean = return_mean
-        if num_samples > 1:
-            self.model = [self.model.copy() for sample in range(num_samples)]
+
+    def instantiate_models(self, model, model_params={}, num_samples=5):
+        model = [self.instantiate_model(model,model_params) for sample in range(num_samples)]
+        return model
 
     def fit(self, message_data):
         """
         Fits self.model on message_data["quantities"]
         """
+        # get number of samples
+        self.num_samples = message_data["quantities"].shape[0]
+
+        # if it is not a single model, here we instantiate multiple models as a list
+        if not self.single_model:
+            self.model = self.instantiate_models(model=self.model_class,
+                                                model_params=self.model_params,
+                                                num_samples=self.num_samples)
+        else:
+            self.model = self.instantiate_model(models=self.model_class,
+                                                model_params=self.model_params)
+
+        # if the model is a list i.e not a single_model
+        # then we fit every model in the list to the data
         if isinstance(self.model, list):
             for sample_i,model in enumerate(self.model):
                 if hasattr(model, "fit"):
                     x_train = message_data["quantities"][sample_i]
                     self.model[sample_i].fit(x_train, message_data["target"])
+
+        # otherwise we fit on a single model on the mean of the data
         else:
             if hasattr(self.model, "fit"):
                 x_train_mean = message_data["quantities"].mean(0)
                 self.model.fit(x_train_mean, message_data["target"])
+        return self.model
 
     def transform(self, message_data):
         """
@@ -291,6 +318,8 @@ class PropagateTransformAgent(ML_TransformAgent):
         """
         Internal function. Transforms and returns message_data["quantities"] using self.model
         """
+
+        # if model is a list of models, assume each model is mapped to the BAE i-th sample number
         if isinstance(self.model, list):
             if hasattr(self.model[0], "transform"):
                 transformed_data = np.array([model.transform(message_data[sample_i]) for sample_i,model in enumerate(self.model)])
@@ -298,6 +327,8 @@ class PropagateTransformAgent(ML_TransformAgent):
                 transformed_data = np.array([model.predict(message_data[sample_i]) for sample_i,model in enumerate(self.model)])
             else:
                 transformed_data = np.array([model(message_data[sample_i]) for sample_i,model in enumerate(self.model)])
+
+        # otherwise, assume a single model, to be applied repeatedly on all the BAE samples
         else:
             if hasattr(self.model, "transform"):
                 transformed_data = np.array([self.model.transform(message_data[sample_i]) for sample_i in range(message_data.shape[0])])
@@ -305,12 +336,18 @@ class PropagateTransformAgent(ML_TransformAgent):
                 transformed_data = np.array([self.model.predict(message_data[sample_i]) for sample_i in range(message_data.shape[0])])
             else:
                 transformed_data = np.array([self.model(message_data[sample_i]) for sample_i in range(message_data.shape[0])])
+
+        # return mean of transformed data or not
         if self.return_mean:
             return transformed_data.mean(0)
         else:
             return transformed_data
 
 class PropagateInverseTransformAgent(PropagateTransformAgent):
+    """
+    A special agent for performing propagated inverse transform on the BAE samples.
+    Expected useful for inverse scaling transformers.
+    """
     def _transform(self, message_data):
         """
         Internal function. Inverse transforms and returns message_data["quantities"] using self.model
@@ -328,8 +365,7 @@ class PropagateInverseTransformAgent(PropagateTransformAgent):
             return transformed_data
 
 
-
-class PropagatePipelineAgent(ML_TransformPipelineAgent):
+class PropagatePipelineAgent(PropagateTransformAgent, ML_TransformPipelineAgent):
     """
     This agent expects to receive reconstructed samples from the BAE Agent, and apply fit_transform on every sample.
 
@@ -337,7 +373,7 @@ class PropagatePipelineAgent(ML_TransformPipelineAgent):
     """
 
     def init_parameters(self, models=[], model_params=[],
-                        num_samples=5, propagate_key = "y_pred", predict_train = False, send_train_model=False, random_state=123):
+                        num_samples=5, propagate_key = "y_pred", predict_train = False, send_train_model=False, use_dmm=False, random_state=123):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -351,58 +387,23 @@ class PropagatePipelineAgent(ML_TransformPipelineAgent):
 
         **model_params : keywords for model parameters instantiation.
         """
-
-        self.set_random_state(random_state)
-        self.predict_train = predict_train
-        self.send_train_model= send_train_model
-        # assume it as a class model to be initialised
-
-        self.model = [make_pipeline(*[model(**model_param) for model,model_param in zip(models,model_params)]) for sample in range(num_samples)]
+        # create N models
+        self.model_classes = models
+        self.model_params = model_params
         self.propagate_key = propagate_key
 
-    def fit(self, message_data):
-        """
-        Fits self.model on message_data["quantities"]
-        """
-
-        for sample_i,model in enumerate(self.model):
-            if hasattr(model, "fit"):
-                x_train = message_data["quantities"][sample_i]
-                self.model[sample_i].fit(x_train, message_data["target"])
-
-    def transform(self, message_data):
-        """
-        Apply transform on every key of the quantities' dict if available
-        Dict can have keys such as "test" , "ood", "train"
-        Otherwise, directly compute on the quantities (assumed to be iterable)
-
-        Each transformed data samples have a dict of {"nll_mu":nll_test_mu, "nll_var": nll_test_var, "y_var":y_test_var, "enc_var":encoded_test}
-
-        e.g message_data["quantities"]["test"]["nll_mu"] OR message_data["quantities"]["nll_mu"]
-
-        """
-
-        if isinstance(message_data["quantities"],dict):
-            return {key:self._transform(message_data["quantities"][key]) for key in message_data["quantities"].keys()}
-        else:
-            x_test = message_data["quantities"]
-            y_pred_test = self._transform(x_test)
-            return y_pred_test
+        super(PropagatePipelineAgent, self).init_parameters(models=None,
+                                                            model_params=None,
+                                                            random_state=random_state,
+                                                            predict_train=predict_train,
+                                                            send_train_model=send_train_model,
+                                                            use_dmm=use_dmm)
 
 
-    def _transform(self, message_data):
-        """
-        Internal function. Transforms and returns message_data["quantities"] using self.model
-        """
 
-        if hasattr(self.model[0], "transform"):
-            transformed_data = np.array([model.transform(message_data[sample_i]) for sample_i,model in enumerate(self.model)])
-        elif hasattr(self.model[0], "predict"):
-            transformed_data = np.array([model.predict(message_data[sample_i]) for sample_i,model in enumerate(self.model)])
-        else:
-            transformed_data = np.array([model(message_data[sample_i]) for sample_i,model in enumerate(self.model)])
-
-        return transformed_data.mean(0)
+    def instantiate_models(self, model, model_params={}, num_samples=5):
+        model = [self.instantiate_model(model,model_params) for sample in range(num_samples)]
+        return model
 
 
 

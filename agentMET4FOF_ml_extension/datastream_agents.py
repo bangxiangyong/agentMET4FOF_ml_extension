@@ -18,11 +18,15 @@ class Liveline_DatastreamAgent(ML_DatastreamAgent):
 
     parameter_choices = {"input_stage": [1,2], "target_stage": [1,2], "train_size": [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]}
 
-    def init_parameters(self, input_stage=1, target_stage=1, train_size=0.5, simulate_batch_size=200, random_state=123):
+    def init_parameters(self, input_stage=1, target_stage=1, train_size=0.5, simulate_batch_size=200, random_state=123, use_dmm=True):
+        super(Liveline_DatastreamAgent, self).init_parameters(datastream=None,
+                                                          train_size=train_size,
+                                                          random_state=random_state,
+                                                          use_dmm=use_dmm)
+
         self.input_stage = input_stage
         self.target_stage = target_stage
-        self.train_size = train_size
-        self.set_random_state(random_state)
+
 
         liveline_datastream = Liveline_DataStream(output_stage=target_stage,
                                                   input_stage=input_stage,
@@ -43,6 +47,9 @@ class Liveline_DatastreamAgent(ML_DatastreamAgent):
 
     def agent_loop(self):
         if self.current_state == "Running":
+            if self.use_dmm:
+                self.send_dmm_code()
+
             self.send_output({"quantities":self.x_train, "target":self.y_train},channel="train")
             self.send_output({"quantities":{"test":self.x_test,"ood":self.x_ood},
                               "target":{"test":self.y_test,"ood":self.y_ood}},
@@ -58,15 +65,19 @@ class Liveline_DatastreamAgent(ML_DatastreamAgent):
 class ZEMA_DatastreamAgent(ML_DatastreamAgent):
     parameter_choices = {"axis":[3,5,7], "train_size":[0.5,0.6,0.7,0.8,0.9]}
 
-    def init_parameters(self, train_axis=[3], test_axis=[], train_size=0.8, random_state=123, shuffle=True, move_axis=True, **data_params):
+    def init_parameters(self, train_axis=[3], test_axis=[], train_size=0.8, random_state=123, use_dmm=True, shuffle=True, **data_params):
         """
         x_train : numpy array of sensor data
         x_test : list of numpy arrays for each axis specified in test_axis
-
         """
-        self.set_random_state(random_state)
-        self.train_size = train_size
+        self.train_axis = train_axis
+        self.test_axis = test_axis
         self.shuffle = shuffle
+
+        super(ZEMA_DatastreamAgent, self).init_parameters(datastream=None,
+                                                          train_size=train_size,
+                                                          random_state=random_state,
+                                                          use_dmm=use_dmm)
 
         x_trains = []
         x_tests = {}
@@ -102,11 +113,6 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
         x_trains = np.concatenate(x_trains, axis=0)
         y_trains = np.concatenate(y_trains, axis=0)
 
-        # move axis
-        if move_axis:
-            x_trains = np.moveaxis(x_trains, 1, 2)
-            x_tests = np.moveaxis(x_tests, 1, 2)
-
         self.set_data_sources(x_train = x_trains,
                               x_test  = x_tests,
                               y_train = y_trains,
@@ -114,6 +120,9 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
 
     def agent_loop(self):
         if self.current_state == "Running":
+            if self.use_dmm:
+                self.send_dmm_code()
+
             self.send_output({"quantities":self.x_train, "target":self.y_train},channel="train")
             if len(self.x_test) > 0:
                 self.send_output({"quantities":self.x_test,

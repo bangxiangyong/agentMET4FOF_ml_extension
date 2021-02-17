@@ -1,7 +1,7 @@
 import numpy as np
 from agentMET4FOF.agentMET4FOF.agents import AgentNetwork
 
-from agentMET4FOF_ml_extension.agents import ML_TransformAgent
+from agentMET4FOF_ml_extension.ml_agents import ML_TransformAgent
 from agentMET4FOF_ml_extension.bae_agents import CBAE_Agent
 from agentMET4FOF_ml_extension.datastream_agents import ZEMA_DatastreamAgent
 from agentMET4FOF_ml_extension.util.fft_sensor import FFT_Sensor
@@ -25,6 +25,7 @@ def main():
                                               ood_axis=[5],
                                               train_size=0.8,
                                               random_state=random_state,
+                                              move_axis=True,
                                               shuffle=True)
 
     minmax_agent = agentNetwork.add_agent(name="MinMaxScaler",
@@ -55,8 +56,6 @@ def main():
                                         use_dmm=True,
                                         dmm_samples=1
                                         )
-
-
 
     ood_evaluate_agent = agentNetwork.add_agent(agentType=OOD_EvaluateAgent)
 

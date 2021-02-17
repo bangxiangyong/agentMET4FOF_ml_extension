@@ -8,15 +8,51 @@ from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.neural_network import MLPClassifier
 
 import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
+from baetorch.baetorch.util.data_model_manager import DataModelManager
 from baetorch.baetorch.util.seed import bae_set_seed
 from .datastreams import IRIS_Datastream, BOSTON_Datastream
 import inspect
+import functools
 
 # Datastream Agent
 from .util.calc_auroc import calc_all_scores
 
+class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
+    """
+    Abstract base class with handy methods for all inherited agents.
 
-class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
+    Such methods include DataModelManager methods, setting random state,
+    """
+
+    def init_dmm(self, use_dmm):
+        """
+        Call this in the init_parameter, after storing local parameters
+        which form the signature of the agent.
+
+        """
+        self.use_dmm = use_dmm
+        if use_dmm:
+           self.dmm = DataModelManager()
+           variables = str({key: str(val) for key, val in self.__dict__.items()
+                            if key not in ["self","dmm","use_dmm","mesa_message_queue","model","mesa_model","backend"]})
+
+           self.dmm_code = self.dmm.encode(variables,return_pickle=False)
+           print(variables)
+           print(self.dmm_code)
+
+    def set_random_state(self, random_state):
+        self.random_state = random_state
+        bae_set_seed(random_state)
+
+    def send_dmm_code(self):
+        # sends out dmm code if available
+        self.send_output(self.dmm_code, channel="dmm_code")
+
+    def mix_dmm_code(self, current_code, received_code):
+        new_dmm_code = self.dmm.encode(datatype=current_code + received_code, return_pickle=False, return_compact=True)
+        return new_dmm_code
+
+class ML_DatastreamAgent(ML_BaseAgent):
     """
     A base class for ML data-streaming agent, which takes into account the train/test split.
 
@@ -30,22 +66,32 @@ class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
     parameter_map = {"datastream":{"IRIS": IRIS_Datastream, "BOSTON":BOSTON_Datastream}}
     stylesheet = "triangle"
 
-    def init_parameters(self, datastream="IRIS", train_size=0.8, random_state=123, **data_params):
+    def init_parameters(self, datastream="IRIS", train_size=0.8, random_state=123, use_dmm=False, **datastream_params):
+        """
+        Initialises important parameters of a base class of ML Datastream
+        Users looking to override this should call this on super() to ensure parameters such as `use_dmm`, `random_state`
+        and `train_size` are filled in.
+
+        If a custom procedure is required for setting up the datastream (other than the basic one provided here),
+        set the datastream parameter to be `None` and proceed in setting up the custom datastream.
+
+        """
+        # if use Data Model Manager is enabled
         self.set_random_state(random_state)
-        datastream = self.parameter_map["datastream"][datastream]
-        self.datastream = datastream(**data_params)
-
         self.train_size = train_size
+        self.init_dmm(use_dmm)
 
-        x_train, x_test, y_train, y_test = train_test_split(self.datastream._quantities, self.datastream._target,
-                                                            train_size=self.train_size,
-                                                            random_state=random_state)
+        if datastream is not None:
+            if isinstance(datastream, str):
+                # resort to default provided datasets
+                datastream = self.parameter_map["datastream"][datastream]
+            self.datastream = datastream(**datastream_params)
 
-        self.set_data_sources(x_train=x_train, x_test=x_test, y_train=y_train, y_test=y_test)
+            x_train, x_test, y_train, y_test = train_test_split(self.datastream._quantities, self.datastream._target,
+                                                                train_size=self.train_size,
+                                                                random_state=random_state)
+            self.set_data_sources(x_train=x_train, x_test=x_test, y_train=y_train, y_test=y_test)
 
-    def set_random_state(self, random_state):
-        self.random_state = random_state
-        bae_set_seed(random_state)
 
     def set_data_sources(self, x_train=None, x_test=None, x_ood=None, y_train=None, y_test=None, y_ood=None):
         """
@@ -62,6 +108,10 @@ class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
 
     def agent_loop(self):
         if self.current_state == "Running":
+            # if use dmm, we send out the dmm code first
+            if self.use_dmm:
+                self.send_dmm_code()
+
             self.send_output({"quantities":self.x_train, "target":self.y_train},channel="train")
             self.send_output({"quantities":self.x_test, "target":self.y_test},channel="test")
             self.current_state = "Idle"
@@ -69,8 +119,10 @@ class ML_DatastreamAgent(agentmet4fof_module.AgentMET4FOF):
         elif self.current_state == "Simulate":
             self.send_output({"quantities": self.datastream.next_sample(batch_size=1)}, channel="simulate")
 
+
+
 # Transform Agent
-class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
+class ML_TransformAgent(ML_BaseAgent):
     """
     A base class for ML_Transform functions, which takes into account the need for fit/transform data
     In `init_parameters`, the `transform_method` is assumed to be a class or function.
@@ -90,7 +142,9 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
     parameter_map = {"model": {"MinMax": MinMaxScaler, "GP":GaussianProcessClassifier, "MLP":MLPClassifier}}
     stylesheet = "ellipse"
 
-    def init_parameters(self, model=MLPClassifier, supervised = False, random_state=123,  **model_params):
+    def init_parameters(self, model=MLPClassifier, random_state=123,
+                        predict_train=True,
+                        send_train_model=False, use_dmm=False, **model_params):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -100,32 +154,44 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
         ----------
         model : class or function
 
-        unsupervised : Boolean. Special keyword for handling fitting to 'target' in the self.fit function
+        predict_train : boolean
+            After fitting model, this determines whether to apply `predict` on the training data and then `send_output`.
+            If we need to propagate the transformed trained data (e.g normalised data), then we should set to `True`, otherwise it is unnecessary and more
+            computationally efficient to set to `False`.
+
+        send_train_model : boolean
+            After fitting model, this parameter determines whether to send out the trained model on the channel "trained_model"
+            On the receiving agent, it can now equip this model to conduct transforms or inverse transforms.
 
         **model_params : keywords for model parameters instantiation.
         """
+        # if use Data Model Manager is enabled
 
         if isinstance(model,str):
             model = self.parameter_map['model'][model]
 
         self.set_random_state(random_state)
-        # assume it as a class model to be initialised
-        self.unsupervised = not supervised
-        self.model_params = model_params
-        self.model = self.instantiate_model(model, model_params)
+        self.predict_train = predict_train
 
-    def instantiate_model(self, model, model_params):
+        # assume it as a class model to be initialised
+        self.model_params = model_params
+        self.send_train_model = send_train_model
+        self.init_dmm(use_dmm)
+
+        if model is not None:
+            self.model = self.instantiate_model(model, model_params)
+
+    def instantiate_model(self, model, model_params={}):
         # instantiate the model if it is a class
-        if hasattr(model, "fit") or inspect.isclass(model):
+        if inspect.isclass(model):
             new_model = model(**model_params)
+        # assume it as a function
+        elif inspect.ismethod(model):
+            new_model = functools.partial(model, **model_params)
+        # it is an already instantiated model
         else:
             new_model = model
-
         return new_model
-
-    def set_random_state(self, random_state):
-        self.random_state = random_state
-        bae_set_seed(random_state)
 
     def on_received_message(self, message):
         """
@@ -133,16 +199,43 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
         """
         # depending on the channel, we train/test using the message's content.
         channel = message["channel"]
+
         # extract meta data if available
         if isinstance(message["data"], dict) and "metadata" in message["data"].keys():
             self.metadata = message["data"]["metadata"]
 
+        # update dmm code and propagate forward
+        if channel == "dmm_code" and self.use_dmm:
+            # self.dmm_code = self.dmm_code+message["data"]
+            self.dmm_code = self.mix_dmm_code(self.dmm_code, message["data"])
+            self.send_output(self.dmm_code, channel="dmm_code")
+
+        if channel == "trained_model":
+            self.model = message["data"]["model"]
+
         if channel == "train":
-            self.fit(message_data=message["data"])
+            # wrap fit method with dmm if enabled
+            if self.use_dmm:
+                self.model = self.dmm.wrap(self.fit, self.dmm_code, message["data"])
+            else:
+                self.model = self.fit(message_data=message["data"])
+
+            if hasattr(self, "send_train_model") and self.send_train_model:
+                self.send_output({"model":self.model}, channel="trained_model")
 
         if (channel in ["train","test","simulate"]):
+            # do not proceed to applying predict on train data
+            # if channel is "train" but predict_train
+            if channel == "train" and not self.predict_train:
+                return 0
+
             # run prediction/transformation
-            transformed_data = self.transform(message["data"])
+            # wrap predictions method with dmm if enabled
+            if self.use_dmm:
+                transformed_data = self.dmm.wrap(self.transform, self.dmm_code, message["data"])
+            else:
+                transformed_data = self.transform(message["data"])
+
             output_message = {"quantities": transformed_data}
 
             # determine if target key is available
@@ -164,6 +257,7 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
         if hasattr(self.model, "fit"):
             print("FITTING:"+str(self.name))
             self.model.fit(message_data["quantities"], message_data["target"])
+        return self.model
 
     def transform(self, message_data):
         """
@@ -192,6 +286,16 @@ class ML_TransformAgent(agentmet4fof_module.AgentMET4FOF):
 
         return transformed_data
 
+class ML_InverseTransformAgent(ML_BaseAgent):
+    def _transform(self, message_data):
+        """
+        Internal function. Inverse transforms and returns message_data["quantities"] using self.model
+        """
+        if hasattr(self.model, "inverse_transform"):
+            transformed_data = self.model.inverse_transform(message_data)
+
+        return transformed_data
+
 class ML_TransformPipelineAgent(ML_TransformAgent):
     """
     Transformer which applies sklearn pipeline style, by combining multiple models in a serial way.
@@ -201,7 +305,8 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
 
     stylesheet = "ellipse"
 
-    def init_parameters(self, models=[MLPClassifier], superviseds = [False], model_params=[], random_state=123):
+    def init_parameters(self, models=[MLPClassifier], model_params=[], random_state=123,
+                        predict_train=False, send_train_model=False, use_dmm=False):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -211,18 +316,27 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
         ----------
         model : class or function
 
-        unsupervised : Boolean. Special keyword for handling fitting to 'target' in the self.fit function
-
         **model_params : keywords for model parameters instantiation.
         """
+        self.model_classes = models
+        self.model_params = model_params
 
-        self.set_random_state(random_state)
+        super(ML_TransformPipelineAgent, self).init_parameters(model=None,
+                                                               random_state=random_state,
+                                                               predict_train=predict_train,
+                                                               send_train_model=False,
+                                                               use_dmm=True)
+
         # assume it as a class model to be initialised
+        if models is not None:
+            self.model = self.instantiate_model(models=models, model_params=model_params)
 
-        self.model = make_pipeline(*[model(**model_param) for model,model_param in zip(models,model_params)])
+    def instantiate_model(self, models, model_params={}):
+        new_model = make_pipeline(*[model(**model_param) for model, model_param in zip(models, model_params)])
+        return new_model
 
 
-class ML_EvaluateAgent(agentmet4fof_module.AgentMET4FOF):
+class ML_EvaluateAgent(ML_BaseAgent):
     """
     Last piece in the ML-Pipeline to evaluate the model's performance on the datastream.
 
@@ -230,9 +344,9 @@ class ML_EvaluateAgent(agentmet4fof_module.AgentMET4FOF):
 
     Use this in the conventional supervised sense.
     """
+
     parameter_choices = {"evaluate_method": ["f1_score", "rmse"], "average":["micro"]}
     parameter_map = {"evaluate_method": {"f1_score": f1_score, "rmse":mean_squared_error}}
-
 
     def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None, send_plot=True,  **evaluate_params):
         evaluate_method_ = self.parameter_map["evaluate_method"][evaluate_method]
@@ -244,19 +358,37 @@ class ML_EvaluateAgent(agentmet4fof_module.AgentMET4FOF):
 
     def on_received_message(self, message):
         if message["channel"] == "test":
-            y_true = message["data"]["target"]
             y_pred = message["data"]["quantities"]
+            y_true = message["data"]["target"]
 
-            results = {evaluate_method.__name__:evaluate_method(y_true, y_pred, **evaluate_param)
-                       for evaluate_method,evaluate_param in zip(self.evaluate_methods,self.evaluate_params)}
+
+            # check if it is a dictionary
+            if isinstance(y_pred, dict):
+                results = {}
+                for y_key in y_pred.keys():
+                    temp_results = {evaluate_method.__name__+"-"+y_key:evaluate_method(y_true[y_key], y_pred[y_key], **evaluate_param)
+                               for evaluate_method,evaluate_param in zip(self.evaluate_methods,self.evaluate_params)}
+                    results.update(temp_results)
+
+
+            else:
+                results = {evaluate_method.__name__:evaluate_method(y_true, y_pred, **evaluate_param)
+                           for evaluate_method,evaluate_param in zip(self.evaluate_methods,self.evaluate_params)}
             self.log_info(str(results))
             self.upload_result(results)
 
             # regression
             if self.evaluate_method == "rmse":
-                graph_comparison = self.plot_comparison(y_true, y_pred,
-                                                        from_agent=message['from'],
-                                                        sum_performance="RMSE: " + str(results['mean_squared_error']))
+                if isinstance(y_pred, dict):
+                    graph_comparison = [self.plot_comparison(y_true_i, y_pred_i,
+                                                            from_agent=message['from'] + "("+key+")",
+                                                            sum_performance="RMSE: " + str(result))
+                                        for y_true_i,y_pred_i, key, result in zip(y_true.values(),y_pred.values(),results.keys(), results.values())]
+                else:
+                    graph_comparison = self.plot_comparison(y_true, y_pred,
+                                                            from_agent=message['from'],
+                                                            sum_performance="RMSE: " + str(results['mean_squared_error']))
+
                 self.send_plot(graph_comparison)
 
     def upload_result(self, results):
@@ -280,7 +412,7 @@ class ML_EvaluateAgent(agentmet4fof_module.AgentMET4FOF):
         return fig
 
 
-class ML_AggregatorAgent(agentmet4fof_module.AgentMET4FOF):
+class ML_AggregatorAgent(ML_BaseAgent):
     """
     Syncs and concatenate the data from its Input Agents
     """
