@@ -33,12 +33,20 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
         self.use_dmm = use_dmm
         if use_dmm:
            self.dmm = DataModelManager()
-           variables = str({key: str(val) for key, val in self.__dict__.items()
-                            if key not in ["self","dmm","use_dmm","mesa_message_queue","model","mesa_model","backend"]})
+           self.dmm_code = self.encode_current_params()
 
-           self.dmm_code = self.dmm.encode(variables,return_pickle=False)
-           print(variables)
-           print(self.dmm_code)
+    def get_current_params(self):
+        variables = str({key: val.__name__ if (inspect.isfunction(val) or inspect.ismethod(val) or inspect.isclass(val))
+        else str(val) for key, val in self.__dict__.items()
+                         if
+                         key not in ["self", "dmm", "use_dmm", "mesa_message_queue", "model", "mesa_model", "backend", "forward_model","bae_model"]})
+        print("-------------------------")
+        print(self.name)
+        print(variables)
+        return variables
+
+    def encode_current_params(self):
+        return self.dmm.encode(self.get_current_params(),return_pickle=False, return_compact=True)
 
     def set_random_state(self, random_state):
         self.random_state = random_state
@@ -46,7 +54,7 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
 
     def send_dmm_code(self):
         # sends out dmm code if available
-        self.send_output(self.dmm_code, channel="dmm_code")
+        self.send_output({"dmm_code":self.dmm_code}, channel="dmm_code")
 
     def mix_dmm_code(self, current_code, received_code):
         new_dmm_code = self.dmm.encode(datatype=current_code + received_code, return_pickle=False, return_compact=True)
@@ -178,7 +186,9 @@ class ML_TransformAgent(ML_BaseAgent):
         # if use Data Model Manager is enabled
 
         if isinstance(model,str):
-            model = self.parameter_map['model'][model]
+            self.model_class = self.parameter_map['model'][model]
+        elif model is not None:
+            self.model_class = model
 
         self.set_random_state(random_state)
         self.predict_train = predict_train
@@ -189,9 +199,12 @@ class ML_TransformAgent(ML_BaseAgent):
         self.init_dmm(use_dmm)
 
         if model is not None:
-            self.forward_model = self.instantiate_model(model, model_params)
+            self.forward_model = self.instantiate_model()
 
-    def instantiate_model(self, model, model_params={}):
+    def instantiate_model(self):
+        model = self.model_class
+        model_params = self.model_params
+
         # instantiate the model if it is a class
         if inspect.isclass(model):
             new_model = model(**model_params)
@@ -217,8 +230,10 @@ class ML_TransformAgent(ML_BaseAgent):
         # update dmm code and propagate forward
         if channel == "dmm_code" and self.use_dmm:
             # self.dmm_code = self.dmm_code+message["data"]
-            self.dmm_code = self.mix_dmm_code(self.dmm_code, message["data"])
+            self.log_info("BEFORE DMM CODE: "+self.dmm_code)
+            self.dmm_code = self.mix_dmm_code(self.dmm_code, message["data"]["dmm_code"])
             self.send_dmm_code()
+            self.log_info("AFTER DMM CODE: "+self.dmm_code)
 
         if channel == "trained_model":
             self.forward_model = message["data"]["model"]
@@ -309,7 +324,8 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
 
     stylesheet = "ellipse"
 
-    def init_parameters(self, models=[MLPClassifier], model_params=[], random_state=123,
+    def init_parameters(self, pipeline_models=[MLPClassifier],
+                        pipeline_params=[], random_state=123,
                         predict_train=False, send_train_model=False, use_dmm=False):
         """
         Initialise model parameters.
@@ -320,10 +336,10 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
         ----------
         model : class or function
 
-        **model_params : keywords for model parameters instantiation.
+        **pipeline_params : keywords for model parameters instantiation.
         """
-        self.model_classes = models
-        self.model_params = model_params
+        self.pipeline_models = pipeline_models
+        self.pipeline_params = pipeline_params
 
         super(ML_TransformPipelineAgent, self).init_parameters(model=None,
                                                                random_state=random_state,
@@ -332,13 +348,13 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
                                                                use_dmm=True)
 
         # assume it as a class model to be initialised
-        if models is not None:
-            self.model = self.instantiate_model(models=models, model_params=model_params)
+        if pipeline_models is not None:
+            self.forward_model = self.instantiate_model()
 
-    def instantiate_model(self, models, model_params={}):
-        new_model = make_pipeline(*[model(**model_param) for model, model_param in zip(models, model_params)])
+    def instantiate_model(self):
+        new_model = make_pipeline(*[model(**model_param) for model,
+                                                             model_param in zip(self.pipeline_models, self.pipeline_params)])
         return new_model
-
 
 class ML_EvaluateAgent(ML_BaseAgent):
     """
