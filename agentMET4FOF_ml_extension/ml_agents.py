@@ -78,6 +78,7 @@ class ML_DatastreamAgent(ML_BaseAgent):
     1) in "Train", it will send out train and test batch of data, and then set to "Idle" state
     2) in "Simulate", it will send out test data one-by-one in a datastream fashion.
     3) Output form : {"quantities": iterable, "target": iterable}
+
     """
 
     parameter_choices = {"datastream": ["IRIS", "BOSTON"], "train_size": [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]}
@@ -138,7 +139,6 @@ class ML_DatastreamAgent(ML_BaseAgent):
             self.send_output({"quantities": self.datastream.next_sample(batch_size=1)}, channel="simulate")
 
 
-
 # Transform Agent
 class ML_TransformAgent(ML_BaseAgent):
     """
@@ -180,6 +180,14 @@ class ML_TransformAgent(ML_BaseAgent):
         send_train_model : boolean
             After fitting model, this parameter determines whether to send out the trained model on the channel "trained_model"
             On the receiving agent, it can now equip this model to conduct transforms or inverse transforms.
+
+        use_dmm : boolean
+            Specify whether to use DataModelManager (DMM) in keeping track of the pipeline which has been executed before.
+            If fitting/transforming has been executed, this loads the transformed data or fitted model from the DMM.
+            Firstly it keeps track of the DMM Code which is an encoded form of the agent's parameters
+            and propagates in the `send_output` with channel of "dmm_code".
+            Receiving agents will `mix` the new received DMM Code with its own DMM Code and propagate the code forward.
+            Due to this, agents have to connect the "dmm_code" channel to fully make use of the `use_dmm` function
 
         **model_params : keywords for model parameters instantiation.
         """
@@ -223,27 +231,7 @@ class ML_TransformAgent(ML_BaseAgent):
         # depending on the channel, we train/test using the message's content.
         channel = message["channel"]
 
-        # extract meta data if available
-        if isinstance(message["data"], dict) and "metadata" in message["data"].keys():
-            self.metadata = message["data"]["metadata"]
-
-        # update dmm code and propagate forward
-        if channel == "dmm_code" and self.use_dmm:
-            # self.dmm_code = self.dmm_code+message["data"]
-            self.log_info("BEFORE DMM CODE: "+self.dmm_code)
-            self.dmm_code = self.mix_dmm_code(self.dmm_code, message["data"]["dmm_code"])
-            self.send_dmm_code()
-            self.log_info("AFTER DMM CODE: "+self.dmm_code)
-
-        if channel == "trained_model":
-            self.forward_model = message["data"]["model"]
-
-        if channel == "train":
-            # wrap fit method with dmm if enabled
-            self.forward_model = self.dmm_wrap(self.fit, message_data=message["data"], additional_id=channel)
-
-            if hasattr(self, "send_train_model") and self.send_train_model:
-                self.send_output({"model":self.forward_model}, channel="trained_model")
+        self.handle_channels(message, channel)
 
         if (channel in ["train","test","simulate"]):
             # do not proceed to applying predict on train data
@@ -268,6 +256,30 @@ class ML_TransformAgent(ML_BaseAgent):
 
             # send output
             self.send_output(output_message, channel=channel)
+
+    def handle_channels(self, message, channel):
+        # extract meta data if available
+        if isinstance(message["data"], dict) and "metadata" in message["data"].keys():
+            self.metadata = message["data"]["metadata"]
+
+        if channel == "metadata":
+            self.metadata = message["data"]
+
+        # update dmm code and propagate forward
+        elif channel == "dmm_code" and self.use_dmm:
+            self.dmm_code = self.mix_dmm_code(self.dmm_code, message["data"]["dmm_code"])
+            self.send_dmm_code()
+
+        elif channel == "trained_model":
+            self.forward_model = message["data"]["model"]
+
+        elif channel == "train":
+            # wrap fit method with dmm if enabled
+            self.forward_model = self.dmm_wrap(self.fit, message_data=message["data"], additional_id=channel)
+
+            if hasattr(self, "send_train_model") and self.send_train_model:
+                self.send_output({"model":self.forward_model}, channel="trained_model")
+
 
     def fit(self, message_data):
         """
@@ -481,6 +493,34 @@ class ML_AggregatorAgent(ML_BaseAgent):
                     metadata = first_entry["metadata"]
                     output_final.update({"metadata": metadata})
                 self.send_output(data=output_final, channel=message["channel"])
+
+class ML_PlottingAgent(ML_TransformAgent):
+
+    def on_received_message(self, message):
+        """
+        Handles data from fit/test/simulate channels
+        """
+        # depending on the channel, we train/test using the message's content.
+        channel = message["channel"]
+
+        self.handle_channels(message, channel)
+
+        if (channel in ["train","test","simulate"]):
+            plot = self.dmm_wrap(self.plot_data, message_data=message["data"], metadata=self.metadata, additional_id=channel+message["from"])
+            self.buffer.store(agent_from=message["from"], data=plot)
+            self.send_plot(self.get_buffered_plots())
+
+    def get_buffered_plots(self):
+        plots = [plot for plot in self.buffer.values()]
+        plots = list(np.concatenate(plots, axis=0))
+
+        return plots
+
+    def plot_data(self, message_data, metadata, **kwargs):
+        x = message_data["quantities"]
+        y = message_data["target"]
+        plot = self.forward_model(x, y, metadata,  **kwargs)
+        return plot
 
 class OOD_EvaluateAgent(ML_EvaluateAgent):
     """

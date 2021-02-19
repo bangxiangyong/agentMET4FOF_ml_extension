@@ -79,8 +79,8 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
                                                           random_state=random_state,
                                                           use_dmm=use_dmm)
 
-        x_trains, x_tests, y_trains, y_tests= self.dmm_wrap(self.prepare_data)
-
+        x_trains, x_tests, y_trains, y_tests, metadata = self.dmm_wrap(self.prepare_data)
+        self.metadata = metadata
         self.set_data_sources(x_train = x_trains,
                               x_test  = x_tests,
                               y_train = y_trains,
@@ -117,10 +117,13 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
                 x_tests.update({str(axis): datastream._quantities})
                 y_tests.update({str(axis): datastream._target})
 
+        # get metadata
+        metadata = {"units":datastream.units, "labels":datastream.labels}
+
         # concatenate into numpy array
         x_trains = np.concatenate(x_trains, axis=0)
         y_trains = np.concatenate(y_trains, axis=0)
-        return x_trains, x_tests, y_trains, y_tests
+        return x_trains, x_tests, y_trains, y_tests, metadata
 
 
 
@@ -129,10 +132,14 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
             if self.use_dmm:
                 self.send_dmm_code()
 
-            self.send_output({"quantities":self.x_train, "target":self.y_train},channel="train")
+            if hasattr(self, "metadata"):
+                self.send_output(self.metadata, channel="metadata")
+
+            self.send_output({"quantities":self.x_train, "target":self.y_train}, channel="train")
             if len(self.x_test) > 0:
                 self.send_output({"quantities":self.x_test,
-                                  "target":self.y_test},
+                                  "target":self.y_test,
+                                  },
                                  channel="test")
 
             self.current_state = "Idle"
