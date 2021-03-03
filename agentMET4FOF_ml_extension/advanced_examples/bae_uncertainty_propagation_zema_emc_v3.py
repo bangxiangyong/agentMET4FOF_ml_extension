@@ -58,17 +58,22 @@ def main():
                                               use_dmm=use_dmm,
                                               send_test_samples =True,
                                               shuffle=True)
-
+    fft_agent = agentNetwork.add_agent(name="FFT", agentType=ML_TransformAgent, model=FFT_Sensor,
+                                       use_dmm=use_dmm, random_state=random_state,
+                                       sampling_f=2000, sensor_axis=2, send_test_samples =True,
+                                       )
     pre_moveaxis_agent = agentNetwork.add_agent(name="Pre-MoveXis", agentType=ML_TransformAgent,
                                                 model=move_axis, predict_train=True, use_dmm=use_dmm, random_state=random_state)
     pre_minmax_agent = agentNetwork.add_agent(name="Pre-MinMax", agentType=ML_TransformAgent,
                                               model=MultiMinMaxScaler, send_train_model=True, use_dmm=use_dmm, random_state=random_state,
                                               clip=False)
 
+
+
     cbae_agent = agentNetwork.add_agent(name="CBAE", agentType=CBAE_Agent,
                                         conv_architecture=[11, 5, 3],
                                         dense_architecture=[100],
-                                        conv_kernel=[200, 100],
+                                        conv_kernel=[100, 50],
                                         conv_stride=[10, 5],
                                         latent_dim=50,
                                         likelihood="1_gaussian",
@@ -101,7 +106,8 @@ def main():
                                                  model=compute_mean_std,
                                                  use_dmm=use_dmm,
                                                  random_state = random_state,
-                                                 send_test_samples = True # this enables `test_samples` channel
+                                                 send_test_samples = True, # this enables `test_samples` channel
+                                                        example_axis=1,
                                                         )
 
     supervised_compute_mean_std_agent = agentNetwork.add_agent(name="SV-Compute-MeanStd", agentType=ML_TransformAgent,
@@ -132,10 +138,12 @@ def main():
     monitor_samples_agent = agentNetwork.add_agent(name="Monitor-Samples",agentType=MonitorAgent)
 
     #==========CBAE PREPROCESSING============
-    datastream_agent.bind_output(pre_moveaxis_agent, channel=["train","test","dmm_code"])
+    # datastream_agent.bind_output(pre_moveaxis_agent, channel=["train","test","dmm_code"])
+    datastream_agent.bind_output(fft_agent, channel=["train", "test", "dmm_code"])
+    fft_agent.bind_output(pre_moveaxis_agent, channel=["train","test","dmm_code"])
     pre_moveaxis_agent.bind_output(pre_minmax_agent, channel=["train", "test","dmm_code"])
-    pre_minmax_agent.bind_output(cbae_agent, channel=["train", "test","dmm_code"])
     pre_minmax_agent.bind_output(post_minmax_agent, channel=["trained_model","dmm_code"])
+    pre_minmax_agent.bind_output(cbae_agent, channel=["train", "test","dmm_code"])
 
     # without min max inverse
     # cbae_agent.bind_output(post_moveaxis_agent, channel=["train", "test","dmm_code"])
@@ -144,7 +152,7 @@ def main():
     cbae_agent.bind_output(post_minmax_agent, channel=["train","test","dmm_code"])
     post_minmax_agent.bind_output(post_moveaxis_agent, channel=["train", "test","dmm_code"])
 
-    post_moveaxis_agent.bind_output(propagate_pipeline_agent, channel=["train", "test","dmm_code"])
+    # post_moveaxis_agent.bind_output(propagate_pipeline_agent, channel=["train", "test","dmm_code"])
 
     # =========SUPERVISED PIPELINE===========
     propagate_pipeline_agent.bind_output(clip0100_agent, channel=["test","dmm_code"])
@@ -164,7 +172,9 @@ def main():
     bae_compute_mean_std_agent.bind_output(plot_recon_agent, channel=["test_samples"])
 
     # raw samples
-    agentNetwork.bind_agents(datastream_agent,plot_sample_agent,channel=["test_samples","metadata"])
+    agentNetwork.bind_agents(datastream_agent,plot_sample_agent,channel=["metadata"])
+    agentNetwork.bind_agents(fft_agent, plot_sample_agent, channel=["test_samples"])
+
     agentNetwork.bind_agents(datastream_agent,plot_recon_agent,channel=["metadata"])
 
     # connect plotting agents to monitors

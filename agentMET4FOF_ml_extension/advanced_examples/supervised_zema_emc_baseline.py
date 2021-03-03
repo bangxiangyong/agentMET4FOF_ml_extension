@@ -36,8 +36,8 @@ def main():
                                               shuffle=True)
 
     pipeline_agent = agentNetwork.add_agent(name="Supervised-Pipeline", agentType=ML_TransformPipelineAgent, random_state=random_state,
-                                                      models=[FFT_BFC, Pearson_FeatureSelection, RandomForestRegressor],
-                                                      model_params=[{},{},{}], use_dmm=use_dmm
+                                                      pipeline_models=[FFT_BFC, Pearson_FeatureSelection, BayesianRidge],
+                                                      pipeline_params=[{},{},{}], use_dmm=use_dmm
                                                       )
 
     postproc_agent = agentNetwork.add_agent(name="Clipping-0-100",agentType=ML_TransformAgent, model= clip01, use_dmm=use_dmm)
