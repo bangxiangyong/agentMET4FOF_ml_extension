@@ -22,6 +22,9 @@ import matplotlib
 matplotlib.use("Agg")
 
 class EvaluateSupervisedUncAgent(ML_BaseAgent):
+    def init_parameters(self, figsize=(10,5)):
+        self.figsize = figsize
+
     def on_received_message(self, message):
         """
         First dim: mean (0) and std (1) of supervised predictions
@@ -32,11 +35,17 @@ class EvaluateSupervisedUncAgent(ML_BaseAgent):
         ys = message["data"]["target"]
 
         if isinstance(xs,dict):
-            evaluations = [self.apply_evaluate_method(xs[key],ys[key], key=key) for key in xs.keys()]
+            evaluations = {}
+            plots = []
+            for key in xs.keys():
+                evaluation, plot = self.apply_evaluate_method(xs[key],ys[key], key=key)
+                evaluations.update({key:evaluation})
+                plots.append(plot)
         else:
-            evaluations = self.apply_evaluate_method(xs,ys)
+            evaluations, plots = self.apply_evaluate_method(xs,ys)
 
-        self.send_plot(evaluations)
+        self.send_plot(plots)
+        self.send_output(evaluations, channel="default")
 
     def apply_evaluate_method(self, x,y, key=""):
         # do something with x and y
@@ -57,8 +66,11 @@ class EvaluateSupervisedUncAgent(ML_BaseAgent):
         # picp = self.picp(y_temp, x_mean, x_std)
 
         # plots
-        new_fig = self.plot_uncertainty_calibration(x=x_mean,ux=x_std, y=y_temp, title="Axis "+key+" RMSE: "+str(round(rmse,2)) + " UNC: "+str(round(avg_unc,2)))
-        return new_fig
+        new_fig = self.plot_uncertainty_calibration(x=x_mean,ux=x_std, y=y_temp,
+                                                    title="Axis "+key+" RMSE: "+str(round(rmse,2)) + " UNC: "+str(round(avg_unc,2)),
+                                                    figsize=self.figsize)
+
+        return {"rmse":rmse, "avg_unc":avg_unc}, new_fig
 
     def rmse(self, y_true, y_pred):
         return np.sqrt(mean_squared_error(y_true,y_pred))
