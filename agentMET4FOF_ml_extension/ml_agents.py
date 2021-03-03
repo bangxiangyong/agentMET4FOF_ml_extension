@@ -13,6 +13,7 @@ from baetorch.baetorch.util.seed import bae_set_seed
 from .datastreams import IRIS_Datastream, BOSTON_Datastream
 import inspect
 import functools
+import pandas as pd
 
 # Datastream Agent
 from .util.calc_auroc import calc_all_scores
@@ -23,26 +24,24 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
 
     Such methods include DataModelManager methods, setting random state,
     """
+    example_axis = 0
 
-    def init_dmm(self, use_dmm):
+    def init_dmm(self, use_dmm, dmm_folder="C:/bae_data_models", disable_channels=[]):
         """
         Call this in the init_parameter, after storing local parameters
         which form the signature of the agent.
 
         """
         self.use_dmm = use_dmm
-        if use_dmm:
-           self.dmm = DataModelManager()
-           self.dmm_code = self.encode_current_params()
+        self.dmm = DataModelManager(lookup_table_folder=dmm_folder)
+        self.dmm_code = self.encode_current_params()
+        self.disable_channels = disable_channels
 
     def get_current_params(self):
         variables = str({key: val.__name__ if (inspect.isfunction(val) or inspect.ismethod(val) or inspect.isclass(val))
         else str(val) for key, val in self.__dict__.items()
                          if
                          key not in ["self", "dmm", "use_dmm", "mesa_message_queue", "model", "mesa_model", "backend", "forward_model","bae_model"]})
-        print("-------------------------")
-        print(self.name)
-        print(variables)
         return variables
 
     def encode_current_params(self):
@@ -65,10 +64,68 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
         Convenient method for wrapping the DMM around a method with self checking on whether the self.use_dmm parameter is used.
         """
 
-        if self.use_dmm:
+        if self.use_dmm and additional_id not in self.disable_channels:
             return self.dmm.wrap(wrap_method, additional_id+self.dmm_code, *args, **kwargs)
         else:
             return wrap_method(*args, **kwargs)
+
+    def get_random_examples(self, x, y=None, random_size=3):
+        """
+        Get random examples from the whole datastream/set for ease of plotting/visualising
+
+        Handles np.array and pd DataFrame even within nested dictionary.
+
+        Parameters
+        ----------
+        x : iterable or dict of iterable
+        y : iterable or dict of iterable (optional)
+            For dict of iterable, assume same keys as x
+        random_size : int
+            number of random samples to be drawn
+
+        """
+        if hasattr(self,"random_state"):
+            self.set_random_state(self.random_state)
+
+        if y is None:
+            y_able = False
+        else:
+            y_able = True
+        if isinstance(x, dict):
+            examples_x = {}
+            examples_y = {}
+            for key in x.keys():
+                random_samples = np.random.randint(low=0, high=x[key].shape[self.example_axis], size=random_size)
+                examples_x.update({key:self.get_random_examples_(x[key], indices=random_samples, axis=self.example_axis)})
+                if y_able:
+                    examples_y.update({key:self.get_random_examples_(y[key], indices=random_samples, axis=0)})
+        else:
+            random_samples = np.random.randint(low=0, high=x.shape[self.example_axis], size=random_size)
+            examples_x = self.get_random_examples_(x, indices=random_samples, axis=self.example_axis)
+            if y_able:
+                examples_y = self.get_random_examples_(y, indices=random_samples, axis=0)
+        if y_able:
+            return examples_x, examples_y
+        else:
+            return examples_x
+
+    def get_random_examples_(self, data, indices, axis=1):
+        subset = []
+        if axis == 0 :
+            if isinstance(data, np.ndarray):
+                subset = data[indices]
+            elif isinstance(data, pd.DataFrame):
+                subset = data.iloc[indices]
+            else:
+                raise NotImplemented
+        elif axis == 1:
+            if isinstance(data, np.ndarray):
+                subset = data[:,indices]
+            elif isinstance(data, pd.DataFrame):
+                subset = data.iloc[:,indices]
+            else:
+                raise NotImplemented
+        return subset
 
 class ML_DatastreamAgent(ML_BaseAgent):
     """
@@ -162,7 +219,7 @@ class ML_TransformAgent(ML_BaseAgent):
 
     def init_parameters(self, model=MLPClassifier, random_state=123,
                         predict_train=True,
-                        send_train_model=False, use_dmm=False, **model_params):
+                        send_train_model=False, use_dmm=False, send_test_samples=False, example_axis=None, **model_params):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -197,15 +254,17 @@ class ML_TransformAgent(ML_BaseAgent):
             self.model_class = self.parameter_map['model'][model]
         elif model is not None:
             self.model_class = model
+        if example_axis is not None:
+            self.example_axis = example_axis
 
         self.set_random_state(random_state)
         self.predict_train = predict_train
+        self.send_test_samples = send_test_samples
 
         # assume it as a class model to be initialised
         self.model_params = model_params
         self.send_train_model = send_train_model
         self.init_dmm(use_dmm)
-
         if model is not None:
             self.forward_model = self.instantiate_model()
 
@@ -241,6 +300,7 @@ class ML_TransformAgent(ML_BaseAgent):
 
             # run prediction/transformation
             # wrap predictions method with dmm if enabled
+
             transformed_data = self.dmm_wrap(self.transform, message_data=message["data"], additional_id=channel)
 
             output_message = {"quantities": transformed_data}
@@ -254,19 +314,29 @@ class ML_TransformAgent(ML_BaseAgent):
             if hasattr(self, "metadata"):
                 output_message.update({"metadata":self.metadata})
 
+            # send random test examples
+            if self.send_test_samples and channel == "test":
+                if target_available:
+                    examples_x, examples_y =self.get_random_examples(transformed_data, message["data"]["target"])
+                    self.send_output({"quantities": examples_x, "target":examples_y}, channel="test_samples")
+
+                else:
+                    examples_x = self.get_random_examples(transformed_data)
+                    self.send_output({"quantities":examples_x}, channel="test_samples")
+
             # send output
             self.send_output(output_message, channel=channel)
 
     def handle_channels(self, message, channel):
         # extract meta data if available
-        if isinstance(message["data"], dict) and "metadata" in message["data"].keys():
-            self.metadata = message["data"]["metadata"]
+        # if isinstance(message["data"], dict) and "metadata" in message["data"].keys():
+        #     self.metadata = message["data"]["metadata"]
 
         if channel == "metadata":
             self.metadata = message["data"]
 
         # update dmm code and propagate forward
-        elif channel == "dmm_code" and self.use_dmm:
+        elif channel == "dmm_code":
             self.dmm_code = self.mix_dmm_code(self.dmm_code, message["data"]["dmm_code"])
             self.send_dmm_code()
 
@@ -317,7 +387,7 @@ class ML_TransformAgent(ML_BaseAgent):
 
         return transformed_data
 
-class ML_InverseTransformAgent(ML_BaseAgent):
+class ML_InverseTransformAgent(ML_TransformAgent):
     def _transform(self, message_data):
         """
         Internal function. Inverse transforms and returns message_data["quantities"] using self.model
@@ -338,7 +408,7 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
 
     def init_parameters(self, pipeline_models=[MLPClassifier],
                         pipeline_params=[], random_state=123,
-                        predict_train=False, send_train_model=False, use_dmm=False):
+                        predict_train=False, send_train_model=False, send_test_samples=False, use_dmm=False, example_axis=None):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -356,8 +426,8 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
         super(ML_TransformPipelineAgent, self).init_parameters(model=None,
                                                                random_state=random_state,
                                                                predict_train=predict_train,
-                                                               send_train_model=False,
-                                                               use_dmm=True)
+                                                               send_train_model=False, send_test_samples=send_test_samples,
+                                                               use_dmm=True, example_axis=None)
 
         # assume it as a class model to be initialised
         if pipeline_models is not None:
@@ -505,7 +575,7 @@ class ML_PlottingAgent(ML_TransformAgent):
 
         self.handle_channels(message, channel)
 
-        if (channel in ["train","test","simulate"]):
+        if (channel in ["train","test","simulate", "test_samples"]):
             plot = self.dmm_wrap(self.plot_data, message_data=message["data"], metadata=self.metadata, additional_id=channel+message["from"])
             self.buffer.store(agent_from=message["from"], data=plot)
             self.send_plot(self.get_buffered_plots())
@@ -516,10 +586,11 @@ class ML_PlottingAgent(ML_TransformAgent):
 
         return plots
 
-    def plot_data(self, message_data, metadata, **kwargs):
+    def plot_data(self, message_data, metadata=None, **kwargs):
         x = message_data["quantities"]
         y = message_data["target"]
         plot = self.forward_model(x, y, metadata,  **kwargs)
+
         return plot
 
 class OOD_EvaluateAgent(ML_EvaluateAgent):
