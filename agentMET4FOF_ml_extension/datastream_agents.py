@@ -65,7 +65,9 @@ class Liveline_DatastreamAgent(ML_DatastreamAgent):
 class ZEMA_DatastreamAgent(ML_DatastreamAgent):
     parameter_choices = {"axis":[3,5,7], "train_size":[0.5,0.6,0.7,0.8,0.9]}
 
-    def init_parameters(self, train_axis=[3], test_axis=[], train_size=0.8, random_state=123, use_dmm=True, shuffle=True, **data_params):
+    def init_parameters(self, train_axis=[3], test_axis=[], train_size=0.8, random_state=123,
+                        use_dmm=True, shuffle=True, send_test_samples=False, return_full_test=False,
+                        **data_params):
         """
         x_train : numpy array of sensor data
         x_test : list of numpy arrays for each axis specified in test_axis
@@ -73,6 +75,8 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
         self.train_axis = train_axis
         self.test_axis = test_axis
         self.shuffle = shuffle
+        self.send_test_samples = send_test_samples
+        self.return_full_test = return_full_test
 
         super(ZEMA_DatastreamAgent, self).init_parameters(datastream=None,
                                                           train_size=train_size,
@@ -102,8 +106,12 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
             y_trains.append(y_train)
 
             if axis in self.test_axis:
-                x_tests.update({str(axis): x_test})
-                y_tests.update({str(axis): y_test})
+                if not self.return_full_test:
+                    x_tests.update({str(axis): x_test})
+                    y_tests.update({str(axis): y_test})
+                else:
+                    x_tests.update({str(axis): datastream._quantities})
+                    y_tests.update({str(axis): datastream._target})
 
         # configure test datasets
         for axis in self.test_axis:
@@ -125,12 +133,9 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
         y_trains = np.concatenate(y_trains, axis=0)
         return x_trains, x_tests, y_trains, y_tests, metadata
 
-
-
     def agent_loop(self):
         if self.current_state == "Running":
-            if self.use_dmm:
-                self.send_dmm_code()
+            self.send_dmm_code()
 
             if hasattr(self, "metadata"):
                 self.send_output(self.metadata, channel="metadata")
@@ -141,5 +146,14 @@ class ZEMA_DatastreamAgent(ML_DatastreamAgent):
                                   "target":self.y_test,
                                   },
                                  channel="test")
+
+                # if send_test_samples is enabled, we send some random test_samples to be plotted
+                if self.send_test_samples:
+                    x_random, y_random = self.get_random_examples(self.x_test,self.y_test)
+                    self.send_output({"quantities":x_random,
+                                      "target":y_random,
+                                      },
+                                     channel="test_samples")
+
 
             self.current_state = "Idle"
