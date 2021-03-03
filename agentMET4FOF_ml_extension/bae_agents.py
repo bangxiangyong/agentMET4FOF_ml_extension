@@ -55,8 +55,12 @@ class CBAE_Agent(ML_TransformAgent):
                         use_dmm=False,
                         dmm_samples = 5,
                         return_samples = False,
+                        send_test_samples = False,
+                        example_axis=None,
                         **data_params):
-
+        if example_axis is not None:
+            self.example_axis = example_axis
+        self.send_test_samples = send_test_samples
         self.set_random_state(random_state)
         self.return_samples = return_samples
         self.send_train_model = send_train_model
@@ -95,7 +99,7 @@ class CBAE_Agent(ML_TransformAgent):
         self.dmm_samples = dmm_samples
 
         # if use Data Model Manager is enabled
-        self.init_dmm(use_dmm=use_dmm)
+        self.init_dmm(use_dmm=use_dmm, disable_channels=["test"])
 
         if self.use_dmm:
             self.bae_dmm_names = []
@@ -209,8 +213,8 @@ class CBAE_Agent(ML_TransformAgent):
 
         if self.return_samples:
             # return {"nll": nll_test, "y_pred": y_pred_test}
-            return {"y_pred": y_pred_test[:,0]}
-
+            # return {"y_pred": y_pred_test[:,0]}
+            return {"y_pred": nll_test[:,0]}
 
         else:
             # compute statistics over BAE sampled parameters
@@ -243,7 +247,7 @@ class PropagateTransformAgent(ML_TransformAgent):
 
 
     """
-
+    example_axis = 1
     def init_parameters(self, model=MultiMinMaxScaler,
                         random_state=123,
                         predict_train=True,
@@ -252,11 +256,14 @@ class PropagateTransformAgent(ML_TransformAgent):
                         single_model = False,
                         propagate_key="y_pred",
                         return_mean=False,
+                        send_test_samples = False,
+                        example_axis =None,
                         **model_params):
 
         self.propagate_key = propagate_key
         self.single_model = single_model
         self.return_mean = return_mean
+        self.send_test_samples = send_test_samples
 
         # create N models
         if model is not None:
@@ -271,7 +278,9 @@ class PropagateTransformAgent(ML_TransformAgent):
                                                              random_state=random_state,
                                                              predict_train=predict_train,
                                                              send_train_model=send_train_model,
-                                                             use_dmm=use_dmm
+                                                             use_dmm=use_dmm,
+                                                             send_test_samples=send_test_samples,
+                                                             example_axis=example_axis
                                                              )
 
         if model is not None and (inspect.ismethod(self.model_class) or inspect.isfunction(self.model_class)):
@@ -370,6 +379,8 @@ class PropagateInverseTransformAgent(PropagateTransformAgent):
     A special agent for performing propagated inverse transform on the BAE samples.
     Expected useful for inverse scaling transformers.
     """
+    example_axis = 1
+
     def _transform(self, message_data):
         """
         Internal function. Inverse transforms and returns message_data["quantities"] using self.model
@@ -401,6 +412,8 @@ class PropagatePipelineAgent(PropagateTransformAgent):
                         send_train_model=False,
                         use_dmm=False,
                         return_mean = False,
+                        send_test_samples= False,
+                        example_axis=None,
                         random_state=123):
         """
         Initialise model parameters.
@@ -426,6 +439,8 @@ class PropagatePipelineAgent(PropagateTransformAgent):
                                                             single_model=single_model,
                                                             propagate_key=propagate_key,
                                                             return_mean=return_mean,
+                                                            send_test_samples=send_test_samples,
+                                                            example_axis=example_axis,
                                                             use_dmm=use_dmm)
 
     def instantiate_model(self):
