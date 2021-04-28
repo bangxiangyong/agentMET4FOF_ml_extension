@@ -5,6 +5,7 @@ import pandas as pd
 import uuid
 import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
 import agentMET4FOF_ml_extension.ml_agents as ml_agents
+from baetorch.baetorch.util.data_model_manager import DataModelManager
 
 
 class ML_Results :
@@ -49,11 +50,16 @@ class ML_ExperimentLite:
         self.file_path = self.base_folder + self.ml_exp_name + ".p"
         self.csv_file_path = self.base_folder + self.ml_exp_name + ".csv"
 
+        self.dmm = DataModelManager()
+
     def create_results(self, ml_performance:dict, ml_parameters=None):
+        encoded_name = self.dmm.encode(str(ml_parameters), return_pickle=False)
+
         ml_results=[]
         for key, val in ml_performance.items():
             temp_ml_results = {"Date":datetime.now()}
             temp_ml_results.update(ml_parameters)
+            temp_ml_results.update({"encode":encoded_name})
             temp_ml_results.update({"perf_name":key, "perf_score":val})
             ml_results.append(temp_ml_results)
         ml_results = pd.DataFrame(ml_results)
