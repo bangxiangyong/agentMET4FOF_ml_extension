@@ -9,7 +9,7 @@ from sklearn.svm import SVC
 from agentMET4FOF.agentMET4FOF.agents import AgentNetwork
 
 from agentMET4FOF_ml_extension.Dashboard_ml_exp import Dashboard_ML_Experiment
-from agentMET4FOF_ml_extension.ml_agents import ML_DatastreamAgent, ML_TransformPipelineAgent, ML_EvaluateAgent
+from agentMET4FOF_ml_extension.ml_agents import ML_DatastreamAgent, ML_TransformPipelineAgent, EvaluateRegressionClassificationAgent
 
 def main():
     #initialise with dashboard ml experiments
@@ -21,7 +21,7 @@ def main():
                                             models=[MinMaxScaler,SVC],
                                             model_params=[{},{"gamma":'auto'}]
                                             )
-    evaluator_agent = agentNetwork.add_agent(agentType=ML_EvaluateAgent, evaluate_method="f1_score", average="micro")
+    evaluator_agent = agentNetwork.add_agent(agentType=EvaluateRegressionClassificationAgent, evaluate_method="f1_score", average="micro")
 
     #bind outputs
     datastream_agent.bind_output(pipeline_agent)
