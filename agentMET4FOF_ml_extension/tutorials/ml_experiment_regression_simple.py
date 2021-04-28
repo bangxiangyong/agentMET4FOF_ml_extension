@@ -8,7 +8,7 @@ from sklearn.ensemble import RandomForestRegressor
 from agentMET4FOF.agentMET4FOF.agents import AgentNetwork, MonitorAgent
 
 from agentMET4FOF_ml_extension.Dashboard_ml_exp import Dashboard_ML_Experiment
-from agentMET4FOF_ml_extension.ml_agents import ML_DatastreamAgent, ML_TransformAgent, ML_EvaluateAgent
+from agentMET4FOF_ml_extension.ml_agents import ML_DatastreamAgent, ML_TransformAgent, EvaluateRegressionClassificationAgent
 
 def main():
     #initialise with dashboard ml experiments
@@ -16,7 +16,7 @@ def main():
 
     datastream_agent = agentNetwork.add_agent(agentType=ML_DatastreamAgent, datastream="BOSTON")
     rf_agent = agentNetwork.add_agent(agentType=ML_TransformAgent, model=RandomForestRegressor)
-    evaluator_agent = agentNetwork.add_agent(agentType=ML_EvaluateAgent, evaluate_method="rmse")
+    evaluator_agent = agentNetwork.add_agent(agentType=EvaluateRegressionClassificationAgent, evaluate_method="rmse")
     monitor_agent = agentNetwork.add_agent(agentType=MonitorAgent)
 
     #bind outputs

@@ -5,7 +5,7 @@ from agentMET4FOF_ml_extension.ml_agents import ML_TransformAgent
 from agentMET4FOF_ml_extension.bae_agents import CBAE_Agent
 from agentMET4FOF_ml_extension.datastream_agents import ZEMA_DatastreamAgent
 from agentMET4FOF_ml_extension.util.fft_sensor import FFT_Sensor
-from agentMET4FOF_ml_extension.ood_evaluate_agents import OOD_EvaluateAgent
+from agentMET4FOF_ml_extension.ood_evaluate_agents import OOD_EvaluateRegressionClassificationAgent
 from baetorch.baetorch.util.minmax import MultiMinMaxScaler
 
 np.random.seed(100)
@@ -13,6 +13,10 @@ np.random.seed(100)
 import matplotlib
 matplotlib.use('Agg') # https://stackoverflow.com/questions/27147300/matplotlib-tcl-asyncdelete-async-handler-deleted-by-the-wrong-thread
 
+# set drift
+# moving average
+# normalise
+# evaluate ood
 
 def main():
     random_state = 123
@@ -22,11 +26,11 @@ def main():
     # init agents by adding into the agent network
     datastream_agent = agentNetwork.add_agent(agentType=ZEMA_DatastreamAgent,
                                               id_axis=[3],
-                                              ood_axis=[5],
-                                              train_size=0.8,
+                                              ood_axis=[3],
+                                              train_size=0.2,
                                               random_state=random_state,
                                               move_axis=True,
-                                              shuffle=True)
+                                              shuffle=False)
 
     minmax_agent = agentNetwork.add_agent(name="MinMaxScaler",
                                           agentType=ML_TransformAgent,
@@ -57,7 +61,7 @@ def main():
                                         dmm_samples=1
                                         )
 
-    ood_evaluate_agent = agentNetwork.add_agent(agentType=OOD_EvaluateAgent)
+    ood_evaluate_agent = agentNetwork.add_agent(agentType=OOD_EvaluateRegressionClassificationAgent)
 
     # connect fft agent to cbae agent
     datastream_agent.bind_output(fft_agent)

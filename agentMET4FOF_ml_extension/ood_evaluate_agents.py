@@ -1,9 +1,9 @@
-from agentMET4FOF_ml_extension.ml_agents import ML_EvaluateAgent
+from agentMET4FOF_ml_extension.ml_agents import EvaluateRegressionClassificationAgent
 import numpy as np
 
 from agentMET4FOF_ml_extension.util.calc_auroc import calc_all_scores
 
-class OOD_EvaluateAgent(ML_EvaluateAgent):
+class OOD_EvaluateRegressionClassificationAgent(EvaluateRegressionClassificationAgent):
     """
     Last piece in the ML-Pipeline to evaluate the model's performance on the datastream.
     If ml_experiment_proxy is specified, this agent will save the results upon finishing.

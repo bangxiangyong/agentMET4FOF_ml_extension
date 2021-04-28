@@ -2,17 +2,15 @@ import numpy as np
 from sklearn.linear_model import BayesianRidge
 
 from agentMET4FOF.agentMET4FOF.agents import AgentNetwork, MonitorAgent
-from agentMET4FOF_ml_extension.advanced_examples.supervised_zema_emc_baseline import clip01
+from agentMET4FOF_ml_extension.advanced_examples.condition_monitoring.supervised_zema_emc_baseline import clip01
 from agentMET4FOF_ml_extension.evaluate_agents import EvaluateSupervisedUncAgent
 
-from agentMET4FOF_ml_extension.ml_agents import ML_TransformAgent, ML_TransformPipelineAgent, ML_EvaluateAgent, \
-    ML_PlottingAgent
+from agentMET4FOF_ml_extension.ml_agents import ML_TransformAgent, ML_PlottingAgent
 from agentMET4FOF_ml_extension.bae_agents import CBAE_Agent, PropagatePipelineAgent, PropagateTransformAgent, \
     PropagateInverseTransformAgent
 from agentMET4FOF_ml_extension.datastream_agents import ZEMA_DatastreamAgent
 from agentMET4FOF_ml_extension.util.bfc import FFT_BFC
 from agentMET4FOF_ml_extension.util.fft_sensor import FFT_Sensor
-from agentMET4FOF_ml_extension.ood_evaluate_agents import OOD_EvaluateAgent
 from agentMET4FOF_ml_extension.util.helper import compute_mean_std, move_axis
 from agentMET4FOF_ml_extension.util.pearson_fs import Pearson_FeatureSelection
 from agentMET4FOF_ml_extension.util.plot_samples import plot_time_series_samples, plot_uncertain_time_series

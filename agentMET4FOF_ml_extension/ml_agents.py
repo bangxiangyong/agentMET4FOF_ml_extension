@@ -16,7 +16,10 @@ import functools
 import pandas as pd
 
 # Datastream Agent
+from .ml_experiment import ML_ExperimentLite
 from .util.calc_auroc import calc_all_scores
+from .util.helper import flatten_dict
+
 
 class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
     """
@@ -26,7 +29,7 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
     """
     example_axis = 0
 
-    def init_dmm(self, use_dmm, dmm_folder="C:/bae_data_models", disable_channels=[]):
+    def init_dmm(self, use_dmm, dmm_folder="E:/bae_data_models", disable_channels=[]):
         """
         Call this in the init_parameter, after storing local parameters
         which form the signature of the agent.
@@ -41,11 +44,12 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
         variables = str({key: val.__name__ if (inspect.isfunction(val) or inspect.ismethod(val) or inspect.isclass(val))
         else str(val) for key, val in self.__dict__.items()
                          if
-                         key not in ["self", "dmm", "use_dmm", "mesa_message_queue", "model", "mesa_model", "backend", "forward_model","bae_model"]})
+                         key not in ["self", "dmm", "use_dmm", "mesa_message_queue", "model", "mesa_model", "backend",
+                                     "forward_model", "bae_model"]})
         return variables
 
     def encode_current_params(self):
-        return self.dmm.encode(self.get_current_params(),return_pickle=False, return_compact=True)
+        return self.dmm.encode(self.get_current_params(), return_pickle=False, return_compact=True)
 
     def set_random_state(self, random_state):
         self.random_state = random_state
@@ -53,7 +57,7 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
 
     def send_dmm_code(self):
         # sends out dmm code if available
-        self.send_output({"dmm_code":self.dmm_code}, channel="dmm_code")
+        self.send_output({"dmm_code": self.dmm_code}, channel="dmm_code")
 
     def mix_dmm_code(self, current_code, received_code):
         new_dmm_code = self.dmm.encode(datatype=current_code + received_code, return_pickle=False, return_compact=True)
@@ -65,7 +69,7 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
         """
 
         if self.use_dmm and additional_id not in self.disable_channels:
-            return self.dmm.wrap(wrap_method, additional_id+self.dmm_code, *args, **kwargs)
+            return self.dmm.wrap(wrap_method, additional_id + self.dmm_code, *args, **kwargs)
         else:
             return wrap_method(*args, **kwargs)
 
@@ -84,7 +88,7 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
             number of random samples to be drawn
 
         """
-        if hasattr(self,"random_state"):
+        if hasattr(self, "random_state"):
             self.set_random_state(self.random_state)
 
         if y is None:
@@ -96,9 +100,10 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
             examples_y = {}
             for key in x.keys():
                 random_samples = np.random.randint(low=0, high=x[key].shape[self.example_axis], size=random_size)
-                examples_x.update({key:self.get_random_examples_(x[key], indices=random_samples, axis=self.example_axis)})
+                examples_x.update(
+                    {key: self.get_random_examples_(x[key], indices=random_samples, axis=self.example_axis)})
                 if y_able:
-                    examples_y.update({key:self.get_random_examples_(y[key], indices=random_samples, axis=0)})
+                    examples_y.update({key: self.get_random_examples_(y[key], indices=random_samples, axis=0)})
         else:
             random_samples = np.random.randint(low=0, high=x.shape[self.example_axis], size=random_size)
             examples_x = self.get_random_examples_(x, indices=random_samples, axis=self.example_axis)
@@ -111,7 +116,7 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
 
     def get_random_examples_(self, data, indices, axis=1):
         subset = []
-        if axis == 0 :
+        if axis == 0:
             if isinstance(data, np.ndarray):
                 subset = data[indices]
             elif isinstance(data, pd.DataFrame):
@@ -120,12 +125,22 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
                 raise NotImplemented
         elif axis == 1:
             if isinstance(data, np.ndarray):
-                subset = data[:,indices]
+                subset = data[:, indices]
             elif isinstance(data, pd.DataFrame):
-                subset = data.iloc[:,indices]
+                subset = data.iloc[:, indices]
             else:
                 raise NotImplemented
         return subset
+
+    def save_ml_result(self, evaluation_res):
+        if self.ml_exp:
+            if isinstance(evaluation_res, dict):
+                flattened_res = flatten_dict(evaluation_res)
+                self.ml_exp.save_results(ml_performance=flattened_res)
+
+            else:
+                self.ml_exp.save_results(ml_performance={self.model_class.__name__: evaluation_res})
+
 
 class ML_DatastreamAgent(ML_BaseAgent):
     """
@@ -138,11 +153,14 @@ class ML_DatastreamAgent(ML_BaseAgent):
 
     """
 
-    parameter_choices = {"datastream": ["IRIS", "BOSTON"], "train_size": [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]}
-    parameter_map = {"datastream":{"IRIS": IRIS_Datastream, "BOSTON":BOSTON_Datastream}}
+    parameter_choices = {"datastream": ["IRIS", "BOSTON"], "train_size": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]}
+    parameter_map = {"datastream": {"IRIS": IRIS_Datastream, "BOSTON": BOSTON_Datastream}}
     stylesheet = "triangle"
 
-    def init_parameters(self, datastream="IRIS", train_size=0.8, random_state=123, use_dmm=False, **datastream_params):
+    def init_parameters(self, datastream="IRIS", train_size=0.8,
+                        random_state=123,
+                        use_dmm=False,
+                        **datastream_params):
         """
         Initialises important parameters of a base class of ML Datastream
         Users looking to override this should call this on super() to ensure parameters such as `use_dmm`, `random_state`
@@ -168,7 +186,6 @@ class ML_DatastreamAgent(ML_BaseAgent):
                                                                 random_state=random_state)
             self.set_data_sources(x_train=x_train, x_test=x_test, y_train=y_train, y_test=y_test)
 
-
     def set_data_sources(self, x_train=None, x_test=None, x_ood=None, y_train=None, y_test=None, y_ood=None):
         """
         Set train, test and OOD for x and y's.
@@ -188,13 +205,31 @@ class ML_DatastreamAgent(ML_BaseAgent):
             if self.use_dmm:
                 self.send_dmm_code()
 
-            self.send_output({"quantities":self.x_train, "target":self.y_train},channel="train")
-            self.send_output({"quantities":self.x_test, "target":self.y_test},channel="test")
+            self.send_output({"quantities": self.x_train, "target": self.y_train}, channel="train")
+            self.send_output({"quantities": self.x_test, "target": self.y_test}, channel="test")
             self.current_state = "Idle"
 
         elif self.current_state == "Simulate":
             self.send_output({"quantities": self.datastream.next_sample(batch_size=1)}, channel="simulate")
 
+    def get_truncate_indices(self, num_examples: int, cut_first_perc=0.15, cut_last_perc=0.05):
+        indices = np.arange(int(cut_first_perc * num_examples), int((1 - cut_last_perc) * num_examples))
+        return indices
+
+    def truncate_data_xy(self, x, y):
+        if (self.cut_first_perc > 0) or (self.cut_last_perc > 0):
+            num_examples = x.shape[0]
+            indices = self.get_truncate_indices(num_examples=num_examples,
+                                                cut_first_perc=self.cut_first_perc,
+                                                cut_last_perc=self.cut_last_perc)
+            x_truncate = x[indices]
+            if isinstance(y, pd.DataFrame):
+                y_truncate = y.iloc[indices]
+            else:
+                y_truncate = y[indices]
+            return x_truncate, y_truncate
+        else:
+            return x, y
 
 # Transform Agent
 class ML_TransformAgent(ML_BaseAgent):
@@ -214,12 +249,18 @@ class ML_TransformAgent(ML_BaseAgent):
     """
 
     parameter_choices = {"model": ["MinMax", "GP", "MLP"]}
-    parameter_map = {"model": {"MinMax": MinMaxScaler, "GP":GaussianProcessClassifier, "MLP":MLPClassifier}}
+    parameter_map = {"model": {"MinMax": MinMaxScaler, "GP": GaussianProcessClassifier, "MLP": MLPClassifier}}
     stylesheet = "ellipse"
 
-    def init_parameters(self, model=MLPClassifier, random_state=123,
+    def init_parameters(self, model=MLPClassifier,
+                        random_state=123,
                         predict_train=True,
-                        send_train_model=False, use_dmm=False, send_test_samples=False, example_axis=None, **model_params):
+                        send_train_model=False,
+                        use_dmm=False,
+                        send_test_samples=False,
+                        example_axis=None,
+                        func_apply_y=False,
+                        **model_params):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -246,17 +287,23 @@ class ML_TransformAgent(ML_BaseAgent):
             Receiving agents will `mix` the new received DMM Code with its own DMM Code and propagate the code forward.
             Due to this, agents have to connect the "dmm_code" channel to fully make use of the `use_dmm` function
 
+        func_apply_y : boolean
+            Apply the transform method to not only x but y as well.
+            In some specific case, we want to apply the transform on `target` also.
+            This may be, for instance, in a function which removes some samples from both `quantities` and `target`
+
         **model_params : keywords for model parameters instantiation.
+
         """
         # if use Data Model Manager is enabled
 
-        if isinstance(model,str):
+        if isinstance(model, str):
             self.model_class = self.parameter_map['model'][model]
         elif model is not None:
             self.model_class = model
         if example_axis is not None:
             self.example_axis = example_axis
-
+        self.func_apply_y = func_apply_y
         self.set_random_state(random_state)
         self.predict_train = predict_train
         self.send_test_samples = send_test_samples
@@ -292,7 +339,7 @@ class ML_TransformAgent(ML_BaseAgent):
 
         self.handle_channels(message, channel)
 
-        if (channel in ["train","test","simulate"]):
+        if (channel in ["train", "test", "simulate"]):
             # do not proceed to applying predict on train data
             # if channel is "train" but predict_train
             if channel == "train" and not self.predict_train:
@@ -301,28 +348,39 @@ class ML_TransformAgent(ML_BaseAgent):
             # run prediction/transformation
             # wrap predictions method with dmm if enabled
 
-            transformed_data = self.dmm_wrap(self.transform, message_data=message["data"], additional_id=channel)
+            # transformed_data = self.dmm_wrap(self.transform, message_data=message["data"], key="quantities",
+            #                                  additional_id=channel + "quantities")
+            transformed_data = self.transform(message_data=message["data"], key="quantities")
 
             output_message = {"quantities": transformed_data}
 
             # determine if target key is available
             target_available = True if "target" in message["data"].keys() else False
             if target_available:
-                output_message.update({"target":message["data"]["target"]})
+                # in some specific case, we want to apply the transform on `target` also.
+                # this may be, for instance, in a functin which removes some samples from both `quantities` and `target`
+                if self.func_apply_y:
+                    transformed_target = self.dmm_wrap(self.transform, message_data=message["data"], key="target",
+                                                       additional_id=channel + "_target")
+                    output_message.update({"target": transformed_target})
+
+                # default
+                else:
+                    output_message.update({"target": message["data"]["target"]})
 
             # determine if metadata is available
             if hasattr(self, "metadata"):
-                output_message.update({"metadata":self.metadata})
+                output_message.update({"metadata": self.metadata})
 
             # send random test examples
             if self.send_test_samples and channel == "test":
                 if target_available:
-                    examples_x, examples_y =self.get_random_examples(transformed_data, message["data"]["target"])
-                    self.send_output({"quantities": examples_x, "target":examples_y}, channel="test_samples")
+                    examples_x, examples_y = self.get_random_examples(transformed_data, message["data"]["target"])
+                    self.send_output({"quantities": examples_x, "target": examples_y}, channel="test_samples")
 
                 else:
                     examples_x = self.get_random_examples(transformed_data)
-                    self.send_output({"quantities":examples_x}, channel="test_samples")
+                    self.send_output({"quantities": examples_x}, channel="test_samples")
 
             # send output
             self.send_output(output_message, channel=channel)
@@ -348,28 +406,27 @@ class ML_TransformAgent(ML_BaseAgent):
             self.forward_model = self.dmm_wrap(self.fit, message_data=message["data"], additional_id=channel)
 
             if hasattr(self, "send_train_model") and self.send_train_model:
-                self.send_output({"model":self.forward_model}, channel="trained_model")
-
+                self.send_output({"model": self.forward_model}, channel="trained_model")
 
     def fit(self, message_data):
         """
         Fits self.model on message_data["quantities"]
         """
         if hasattr(self.forward_model, "fit"):
-            print("FITTING:"+str(self.name))
+            print("FITTING:" + str(self.name))
             self.forward_model.fit(message_data["quantities"], message_data["target"])
         return self.forward_model
 
-    def transform(self, message_data):
+    def transform(self, message_data, key="quantities"):
         """
         Transforms and returns message_data["quantities"] using self.model
         If "quantities" is a dict, we apply _transform on every key-val pair
         """
 
-        if isinstance(message_data["quantities"], dict):
-            transformed_data = {key:self._transform(val) for key, val in message_data["quantities"].items()}
+        if isinstance(message_data[key], dict):
+            transformed_data = {key_: self._transform(val) for key_, val in message_data[key].items()}
         else:
-            transformed_data = self._transform(message_data["quantities"])
+            transformed_data = self._transform(message_data[key])
 
         return transformed_data
 
@@ -387,6 +444,7 @@ class ML_TransformAgent(ML_BaseAgent):
 
         return transformed_data
 
+
 class ML_InverseTransformAgent(ML_TransformAgent):
     def _transform(self, message_data):
         """
@@ -396,6 +454,7 @@ class ML_InverseTransformAgent(ML_TransformAgent):
             transformed_data = self.forward_model.inverse_transform(message_data)
 
         return transformed_data
+
 
 class ML_TransformPipelineAgent(ML_TransformAgent):
     """
@@ -408,7 +467,8 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
 
     def init_parameters(self, pipeline_models=[MLPClassifier],
                         pipeline_params=[], random_state=123,
-                        predict_train=False, send_train_model=False, send_test_samples=False, use_dmm=False, example_axis=None):
+                        predict_train=False, send_train_model=False, send_test_samples=False, use_dmm=False,
+                        example_axis=None):
         """
         Initialise model parameters.
         Accepts either a class or a function as model.
@@ -426,7 +486,8 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
         super(ML_TransformPipelineAgent, self).init_parameters(model=None,
                                                                random_state=random_state,
                                                                predict_train=predict_train,
-                                                               send_train_model=False, send_test_samples=send_test_samples,
+                                                               send_train_model=False,
+                                                               send_test_samples=send_test_samples,
                                                                use_dmm=True, example_axis=None)
 
         # assume it as a class model to be initialised
@@ -435,10 +496,65 @@ class ML_TransformPipelineAgent(ML_TransformAgent):
 
     def instantiate_model(self):
         new_model = make_pipeline(*[model(**model_param) for model,
-                                                             model_param in zip(self.pipeline_models, self.pipeline_params)])
+                                                             model_param in
+                                    zip(self.pipeline_models, self.pipeline_params)])
         return new_model
 
-class ML_EvaluateAgent(ML_BaseAgent):
+
+class ML_EvaluateAgent(ML_TransformAgent):
+    """
+    Takes in x and y for comparisons.
+
+    """
+
+    def init_parameters(self, model=MLPClassifier,
+                        random_state=123,
+                        predict_train=True,
+                        send_train_model=False,
+                        use_dmm=False,
+                        send_test_samples=False,
+                        example_axis=None,
+                        func_apply_y=False,
+                        ml_exp=False,
+                        **model_params):
+
+        super(ML_EvaluateAgent, self).init_parameters(model=model,
+                                                      random_state=random_state,
+                                                      predict_train=predict_train,
+                                                      send_train_model=send_train_model,
+                                                      use_dmm=use_dmm,
+                                                      send_test_samples=send_test_samples,
+                                                      example_axis=example_axis,
+                                                      func_apply_y=func_apply_y,
+                                                      **model_params
+                                     )
+
+        self.ml_exp = ml_exp
+
+    def on_received_message(self, message):
+        # depending on the channel, we train/test using the message's content.
+        channel = message["channel"]
+
+        self.handle_channels(message, channel)
+
+        if channel == "test":
+            evaluation_res = self.dmm_wrap(self.evaluate_xy, message_data=message["data"],
+                                           additional_id=channel + message["from"])
+            # self.buffer.store(agent_from=message["from"], data=plot)
+            # new_buffer = self.buffer.buffer
+            # buffered_data = flatten_dict(self.buffer.buffer)
+            self.save_ml_result(evaluation_res)
+            self.send_output(evaluation_res)
+
+    def evaluate_xy(self, message_data, **kwargs):
+        x = message_data["quantities"]
+        y = message_data["target"]
+        result = self.forward_model(x, y, **kwargs)
+
+        return result
+
+
+class EvaluateRegressionClassificationAgent(ML_BaseAgent):
     """
     Last piece in the ML-Pipeline to evaluate the model's performance on the datastream.
 
@@ -447,10 +563,10 @@ class ML_EvaluateAgent(ML_BaseAgent):
     Use this in the conventional supervised sense.
     """
 
-    parameter_choices = {"evaluate_method": ["f1_score", "rmse"], "average":["micro"]}
-    parameter_map = {"evaluate_method": {"f1_score": f1_score, "rmse":mean_squared_error}}
+    parameter_choices = {"evaluate_method": ["f1_score", "rmse"], "average": ["micro"]}
+    parameter_map = {"evaluate_method": {"f1_score": f1_score, "rmse": mean_squared_error}}
 
-    def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None, send_plot=True,  **evaluate_params):
+    def init_parameters(self, evaluate_method=[], ml_experiment_proxy=None, send_plot=True, **evaluate_params):
         evaluate_method_ = self.parameter_map["evaluate_method"][evaluate_method]
         self.evaluate_method = evaluate_method
         self.ml_experiment_proxy = ml_experiment_proxy
@@ -463,19 +579,20 @@ class ML_EvaluateAgent(ML_BaseAgent):
             y_pred = message["data"]["quantities"]
             y_true = message["data"]["target"]
 
-
             # check if it is a dictionary
             if isinstance(y_pred, dict):
                 results = {}
                 for y_key in y_pred.keys():
-                    temp_results = {evaluate_method.__name__+"-"+y_key:evaluate_method(y_true[y_key], y_pred[y_key], **evaluate_param)
-                               for evaluate_method,evaluate_param in zip(self.evaluate_methods,self.evaluate_params)}
+                    temp_results = {
+                        evaluate_method.__name__ + "-" + y_key: evaluate_method(y_true[y_key], y_pred[y_key],
+                                                                                **evaluate_param)
+                        for evaluate_method, evaluate_param in zip(self.evaluate_methods, self.evaluate_params)}
                     results.update(temp_results)
 
 
             else:
-                results = {evaluate_method.__name__:evaluate_method(y_true, y_pred, **evaluate_param)
-                           for evaluate_method,evaluate_param in zip(self.evaluate_methods,self.evaluate_params)}
+                results = {evaluate_method.__name__: evaluate_method(y_true, y_pred, **evaluate_param)
+                           for evaluate_method, evaluate_param in zip(self.evaluate_methods, self.evaluate_params)}
             self.log_info(str(results))
             self.upload_result(results)
 
@@ -483,30 +600,32 @@ class ML_EvaluateAgent(ML_BaseAgent):
             if self.evaluate_method == "rmse":
                 if isinstance(y_pred, dict):
                     graph_comparison = [self.plot_comparison(y_true_i, y_pred_i,
-                                                            from_agent=message['from'] + "("+key+")",
-                                                            sum_performance="RMSE: " + str(result))
-                                        for y_true_i,y_pred_i, key, result in zip(y_true.values(),y_pred.values(),results.keys(), results.values())]
+                                                             from_agent=message['from'] + "(" + key + ")",
+                                                             sum_performance="RMSE: " + str(result))
+                                        for y_true_i, y_pred_i, key, result in
+                                        zip(y_true.values(), y_pred.values(), results.keys(), results.values())]
                 else:
                     graph_comparison = self.plot_comparison(y_true, y_pred,
                                                             from_agent=message['from'],
-                                                            sum_performance="RMSE: " + str(results['mean_squared_error']))
+                                                            sum_performance="RMSE: " + str(
+                                                                results['mean_squared_error']))
 
                 self.send_plot(graph_comparison)
 
     def upload_result(self, results):
         if self.ml_experiment_proxy is not None:
-            for key,val in results.items():
-                self.ml_experiment_proxy.upload_result(results={key:val})
+            for key, val in results.items():
+                self.ml_experiment_proxy.upload_result(results={key: val})
                 self.ml_experiment_proxy.save_result()
             self.log_info("Saved results")
 
-    def plot_comparison(self, y_true, y_pred, from_agent = "", sum_performance= ""):
+    def plot_comparison(self, y_true, y_pred, from_agent="", sum_performance=""):
 
         import matplotlib.pyplot as plt
         import matplotlib
         matplotlib.use("Agg")
         fig, ax = plt.subplots()
-        ax.scatter(y_true,y_pred)
+        ax.scatter(y_true, y_pred)
         fig.suptitle("Prediction vs True Label: " + from_agent)
         ax.set_title(sum_performance)
         ax.set_xlabel("Y True")
@@ -520,15 +639,16 @@ class ML_AggregatorAgent(ML_BaseAgent):
     """
     parameter_choices = {}
 
-    def init_parameters(self):
+    def init_parameters(self, concat_axis=-1):
         self.train_size = None
         self.test_size = None
+        self.concat_axis = concat_axis
 
     def on_received_message(self, message):
         if self.current_state == "Running":
-            #update buffer with received data from input agent
-            #By default, the AgentBuffer is a FIFO buffer and when new n entries are added to a filled buffer,
-            #n entries from the left of buffer will be automatically removed.
+            # update buffer with received data from input agent
+            # By default, the AgentBuffer is a FIFO buffer and when new n entries are added to a filled buffer,
+            # n entries from the left of buffer will be automatically removed.
 
             # store data from input agents as list of 'packets'
             # hence each index of the list will be used to sync the data entries
@@ -538,7 +658,7 @@ class ML_AggregatorAgent(ML_BaseAgent):
             input_agent_keys = list(self.Inputs.keys())
             sync_counter = 0
             for input_agent in input_agent_keys:
-                if (input_agent in buffer_keys) and (len(self.buffer[input_agent]) >0):
+                if (input_agent in buffer_keys) and (len(self.buffer[input_agent]) > 0):
                     sync_counter += 1
             if sync_counter == len(input_agent_keys):
                 popped_data = self.buffer.popleft(n=1)
@@ -548,23 +668,31 @@ class ML_AggregatorAgent(ML_BaseAgent):
                 # concat_quantities = [popped_data[agent]['quantities'] for agent in popped_data.keys()]
                 output_final = {}
                 concat_quantities = list(popped_data.values())
-                first_entry = concat_quantities[0][0] # {"quantities":[]}
+                first_entry = concat_quantities[0][0]  # {"quantities":[]}
                 if isinstance(first_entry["quantities"], dict):
-                    full_quantities = {key:np.concatenate([quantity[0]["quantities"][key] for quantity in concat_quantities], axis=-1)
-                                       for key in first_entry["quantities"].keys()}
+                    full_quantities = {
+                        key: np.concatenate([quantity[0]["quantities"][key] for quantity in concat_quantities], axis=self.concat_axis)
+                        for key in first_entry["quantities"].keys()}
                 else:
-                    full_quantities = np.concatenate([quantity[0]["quantities"] for quantity in concat_quantities], axis=-1)
+                    full_quantities = np.concatenate([quantity[0]["quantities"] for quantity in concat_quantities],
+                                                     axis=self.concat_axis)
                 # self.send_output({'quantities':buffer_mean, 'time':buffer_content['time'][-1]})
-                output_final.update({"quantities":full_quantities})
-                if isinstance(first_entry,dict) and ("target" in first_entry.keys()):
+                output_final.update({"quantities": full_quantities})
+                if isinstance(first_entry, dict) and ("target" in first_entry.keys()):
                     full_target = first_entry["target"]
                     output_final.update({"target": full_target})
                 if isinstance(first_entry, dict) and ("metadata" in first_entry.keys()):
                     metadata = first_entry["metadata"]
                     output_final.update({"metadata": metadata})
                 self.send_output(data=output_final, channel=message["channel"])
+                # self.buffer.clear()
 
 class ML_PlottingAgent(ML_TransformAgent):
+
+    def init_parameters(self, metadata=None, **params):
+        super(ML_PlottingAgent, self).init_parameters(**params)
+        if metadata is not None:
+            self.metadata = metadata
 
     def on_received_message(self, message):
         """
@@ -575,8 +703,10 @@ class ML_PlottingAgent(ML_TransformAgent):
 
         self.handle_channels(message, channel)
 
-        if (channel in ["train","test","simulate", "test_samples"]):
-            plot = self.dmm_wrap(self.plot_data, message_data=message["data"], metadata=self.metadata, additional_id=channel+message["from"])
+        if (channel in ["train", "test", "simulate", "test_samples"]):
+            plot = self.dmm_wrap(self.plot_data, message_data=message["data"],
+                                 metadata=self.metadata if hasattr(self, "metadata") else None,
+                                 additional_id=channel + message["from"])
             self.buffer.store(agent_from=message["from"], data=plot)
             self.send_plot(self.get_buffered_plots())
 
@@ -589,11 +719,12 @@ class ML_PlottingAgent(ML_TransformAgent):
     def plot_data(self, message_data, metadata=None, **kwargs):
         x = message_data["quantities"]
         y = message_data["target"]
-        plot = self.forward_model(x, y, metadata,  **kwargs)
+        plot = self.forward_model(x, y, metadata, **kwargs)
 
         return plot
 
-class OOD_EvaluateAgent(ML_EvaluateAgent):
+
+class OOD_EvaluateRegressionClassificationAgent(EvaluateRegressionClassificationAgent):
     """
     Last piece in the ML-Pipeline to evaluate the model's performance on the datastream.
     If ml_experiment_proxy is specified, this agent will save the results upon finishing.
@@ -619,7 +750,8 @@ class OOD_EvaluateAgent(ML_EvaluateAgent):
             enc_ood_var = message_data_quantities["ood"]["enc_var"]
 
             max_magnitude = 1000000
-            auroc_score_nllmu, gmean_nllmu, aps_nllmu, tpr_new_nllmu, fpr_new_nllmu = calc_all_scores(nll_test_mu.mean(-1), nll_ood_mu.mean(-1))
+            auroc_score_nllmu, gmean_nllmu, aps_nllmu, tpr_new_nllmu, fpr_new_nllmu = calc_all_scores(
+                nll_test_mu.mean(-1), nll_ood_mu.mean(-1))
             auroc_score_nllvar, gmean_nllvar, aps_nllvar, tpr_new_nllvar, fpr_new_nllvar = calc_all_scores(
                 np.clip(nll_test_var.mean(-1), -max_magnitude, max_magnitude),
                 np.clip(nll_ood_var.mean(-1), -max_magnitude, max_magnitude))
@@ -638,12 +770,12 @@ class OOD_EvaluateAgent(ML_EvaluateAgent):
             score_enc_var = {"auroc": auroc_score_enc_var, "gmean": gmean_enc_var, "aps": aps_enc_var,
                              "tpr": tpr_new_enc_var, "fpr": fpr_new_enc_var}
 
-            score_nll_mu = {key+"-nll-mu":val for key,val in score_nll_mu.items()}
+            score_nll_mu = {key + "-nll-mu": val for key, val in score_nll_mu.items()}
             score_nll_var = {key + "-nll-var": val for key, val in score_nll_var.items()}
             score_y_var = {key + "-y-var": val for key, val in score_y_var.items()}
             score_enc_var = {key + "-enc-var": val for key, val in score_enc_var.items()}
-            results ={}
-            for result in [score_nll_mu,score_nll_var, score_y_var, score_enc_var]:
+            results = {}
+            for result in [score_nll_mu, score_nll_var, score_y_var, score_enc_var]:
                 results.update(result)
 
             self.log_info(str(results))

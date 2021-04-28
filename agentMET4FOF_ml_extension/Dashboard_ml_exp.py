@@ -10,7 +10,7 @@ from dash.exceptions import PreventUpdate
 from agentMET4FOF.agentMET4FOF.dashboard import LayoutHelper
 import pandas as pd
 
-from .ML_Experiment import add_ml_experiment
+from .ml_experiment import add_ml_experiment
 from analyse_ml_results import load_ml_exp_details, load_pd_full, groupby_results
 from dash.dependencies import Input, Output, State
 import numpy as np

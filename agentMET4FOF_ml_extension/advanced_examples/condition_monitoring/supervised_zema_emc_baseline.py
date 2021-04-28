@@ -4,13 +4,13 @@ from sklearn.linear_model import BayesianRidge
 
 from agentMET4FOF.agentMET4FOF.agents import AgentNetwork, MonitorAgent
 
-from agentMET4FOF_ml_extension.ml_agents import ML_TransformAgent, ML_TransformPipelineAgent, ML_EvaluateAgent
+from agentMET4FOF_ml_extension.ml_agents import ML_TransformAgent, ML_TransformPipelineAgent, EvaluateRegressionClassificationAgent
 from agentMET4FOF_ml_extension.bae_agents import CBAE_Agent, PropagatePipelineAgent, PropagateTransformAgent, \
     PropagateInverseTransformAgent
 from agentMET4FOF_ml_extension.datastream_agents import ZEMA_DatastreamAgent
 from agentMET4FOF_ml_extension.util.bfc import FFT_BFC
 from agentMET4FOF_ml_extension.util.fft_sensor import FFT_Sensor
-from agentMET4FOF_ml_extension.ood_evaluate_agents import OOD_EvaluateAgent
+from agentMET4FOF_ml_extension.ood_evaluate_agents import OOD_EvaluateRegressionClassificationAgent
 from agentMET4FOF_ml_extension.util.helper import move_axis, clip01
 from agentMET4FOF_ml_extension.util.pearson_fs import Pearson_FeatureSelection
 from baetorch.baetorch.util.minmax import MultiMinMaxScaler
@@ -41,7 +41,7 @@ def main():
                                                       )
 
     postproc_agent = agentNetwork.add_agent(name="Clipping-0-100",agentType=ML_TransformAgent, model= clip01, use_dmm=use_dmm)
-    evaluator_agent = agentNetwork.add_agent(agentType=ML_EvaluateAgent, evaluate_method="rmse")
+    evaluator_agent = agentNetwork.add_agent(agentType=EvaluateRegressionClassificationAgent, evaluate_method="rmse")
     monitor_agent = agentNetwork.add_agent(agentType=MonitorAgent)
 
     # =========SUPERVISED PIPELINE===========

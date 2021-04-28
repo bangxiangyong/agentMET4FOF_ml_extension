@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 from sklearn.metrics import f1_score, mean_squared_error
 from sklearn.model_selection import train_test_split
@@ -16,7 +18,9 @@ import functools
 import pandas as pd
 # Datastream Agent
 from .ml_agents import ML_BaseAgent
-from .util.calc_auroc import calc_all_scores
+from .util.calc_auroc import calc_all_scores, calc_auroc_score
+import seaborn as sns
+
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use("Agg")
@@ -101,8 +105,109 @@ class EvaluateSupervisedUncAgent(ML_BaseAgent):
 
 
 
+class EvaluateAUROCAgent(ML_BaseAgent):
+    """
+    Takes in BAE mean-var NLL of test inlier and ood and squashes them to 1 dimension as the anomaly score.
+    Calculates the AUROC for the inlier and ood scores.
+
+    Should be used in tandem with `compute_mean_var` agent with return_dict =True
+    """
+    def init_parameters(self, figsize=(10,5), save_pickle=False):
+        self.figsize = figsize
+        self.save_pickle = save_pickle
+
+    def on_received_message(self, message):
+        channel = message["channel"]
+
+        if channel == "test":
+            msg_data = message["data"]
+            if "train" in msg_data["quantities"].keys():
+                has_train_key = True
+                x_train = msg_data["quantities"]["train"]
+            else:
+                has_train_key = False
+
+            x_test = msg_data["quantities"]["test"]
+            x_ood = msg_data["quantities"]["ood"]
+
+            if self.save_pickle:
+                pickle.dump(msg_data, open("dict_raw_nll.p","wb"))
+
+            plots = []
+            for key in list(x_test.keys()): # keys are {mean,var}
+                if has_train_key:
+                    x_train_, x_test_, x_ood_ = self.sum_mean_var(x_train[key],x_test[key],x_ood[key])
+                else:
+                    x_test_, x_ood_ = self.sum_mean_var(x_test[key], x_ood[key])
+                auroc = calc_auroc_score(x_test_, x_ood_)
+
+                if has_train_key:
+                    plots.append(self.plot_histogram(x_test_,x_ood_, x_train=x_train_, title="AUROC-"+key+":"+str(round(auroc,2))))
+                else:
+                    plots.append(
+                        self.plot_histogram(x_test_, x_ood_, title="AUROC-" + key + ":" + str(round(auroc, 2))))
+
+                self.send_output({"AUROC-"+key: auroc}, channel=channel)
+            self.send_plot(plots)
 
 
+    def sum_mean_var_(self, bae_test):
+        while len(bae_test.shape)>1:
+            bae_test = bae_test.sum(-1)
+        return bae_test
+
+    def sum_mean_var(self, *bae_test):
+        return (self.sum_mean_var_(bae_test_i) for bae_test_i in bae_test)
+
+    def plot_histogram(self, x_test,x_ood, x_train=None, title="", density=True):
+        # fig = plt.figure()
+        # plt.hist(x_test, density=density)
+        # plt.hist(x_ood, density=density)
+        # if x_train is not None:
+        #     plt.hist(x_train, density=density)
+        #     plt.legend(["TEST","OOD","TRAIN"])
+        # else:
+        #     plt.legend(["TEST", "OOD"])
+        # plt.title(title)
+        # return fig
+
+        fig, (ax1,ax2)= plt.subplots(1,2)
+        # df = pd.DataFrame({
+        #     'x': [1, 2, 2.5, 3, 3.5, 4, 5],
+        #     'y': [4, 4, 4.5, 5, 5.5, 6, 6],
+        # })
+        # ax = df.plot.kde()
+        sns.kdeplot(data=x_train, ax=ax1)
+        sns.kdeplot(data=x_test, ax=ax1)
+        sns.kdeplot(data=x_ood, ax=ax1)
+        fig.legend(["TRAIN","TEST", "OOD"])
+        ax1.set_title(title)
+
+        # sns.kdeplot(
+        #     data=x_train,
+        #     cumulative=True, common_norm=False, common_grid=True, ax=ax2
+        # )
+        # sns.kdeplot(
+        #     data=x_test,
+        #     cumulative=True, common_norm=False, common_grid=True, ax=ax2
+        # )
+        # sns.kdeplot(
+        #     data=x_ood,
+        #     cumulative=True, common_norm=False, common_grid=True, ax=ax2, complementary=True
+        # )
+
+        sns.ecdfplot(
+            data=x_train, ax=ax2, complementary=True
+        )
+        sns.ecdfplot(
+            data=x_test,  ax=ax2, complementary=True
+        )
+        sns.ecdfplot(
+            data=x_ood,  ax=ax2, complementary=True
+        )
+        fig.tight_layout()
+
+        return fig
 
 
 
