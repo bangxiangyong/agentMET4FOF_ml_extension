@@ -13,9 +13,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
-from agentMET4FOF_ml_extension.util.tukey_fence import tukey_fence_outlier
-from agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
-from agentMET4FOF_ml_extension.util.calc_outlier import get_num_outliers_df
+from .util.tukey_fence import tukey_fence_outlier
+
+from ..agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
+from .util.calc_outlier import get_num_outliers_df
 
 
 class IRIS_Datastream(DataStreamMET4FOF):

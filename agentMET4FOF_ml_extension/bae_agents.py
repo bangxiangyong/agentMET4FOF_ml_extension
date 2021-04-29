@@ -5,19 +5,20 @@ import numpy as np
 from captum.attr import DeepLift
 from sklearn.pipeline import make_pipeline
 
-from agentMET4FOF_ml_extension.ml_agents import ML_TransformAgent
-from agentMET4FOF_ml_extension.util.attribution import get_attribution
-from baetorch.baetorch.lr_range_finder import run_auto_lr_range_v2
-from baetorch.baetorch.models.bae_ensemble import BAE_Ensemble
-from baetorch.baetorch.models.base_autoencoder import Encoder, infer_decoder, Autoencoder
-from baetorch.baetorch.models.base_layer import DenseLayers, Conv1DLayers
-from baetorch.baetorch.util.convert_dataloader import convert_dataloader
-from baetorch.baetorch.util.minmax import MultiMinMaxScaler
-from baetorch.baetorch.util.misc import save_bae_model, load_bae_model
+from .ml_agents import ML_TransformAgent
+from .util.attribution import get_attribution
+
+from ..baetorch.baetorch.lr_range_finder import run_auto_lr_range_v2
+from ..baetorch.baetorch.models.bae_ensemble import BAE_Ensemble
+from ..baetorch.baetorch.models.base_autoencoder import Encoder, infer_decoder, Autoencoder
+from ..baetorch.baetorch.models.base_layer import DenseLayers, Conv1DLayers
+from ..baetorch.baetorch.util.convert_dataloader import convert_dataloader
+from ..baetorch.baetorch.util.minmax import MultiMinMaxScaler
+from ..baetorch.baetorch.util.misc import save_bae_model, load_bae_model
 from types import MethodType
 
 # Convolutional BAE Agent
-from baetorch.baetorch.util.seed import bae_set_seed
+from ..baetorch.baetorch.util.seed import bae_set_seed
 
 
 class CBAE_Agent(ML_TransformAgent):

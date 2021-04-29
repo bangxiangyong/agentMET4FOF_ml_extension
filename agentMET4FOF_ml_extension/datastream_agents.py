@@ -1,11 +1,11 @@
+import numpy as np
 from sklearn.model_selection import train_test_split
 
-from agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
-from agentMET4FOF_ml_extension.ml_agents import ML_DatastreamAgent
-from agentMET4FOF_ml_extension.datastreams import Liveline_DataStream, ZEMA_DataStream, STRATH_Datastream, \
+from .datastreams import Liveline_DataStream, ZEMA_DataStream, STRATH_Datastream, \
     PRONOSTIA_DataStream
-import numpy as np
-import pandas as pd
+from .ml_agents import ML_DatastreamAgent
+from ..agentMET4FOF.agentMET4FOF.streams import DataStreamMET4FOF
+
 
 # Datastream Agent
 

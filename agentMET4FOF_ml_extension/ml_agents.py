@@ -1,27 +1,26 @@
+import functools
+import inspect
+
 import numpy as np
+import pandas as pd
+from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.metrics import f1_score, mean_squared_error
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.gaussian_process import GaussianProcessClassifier
-
 from sklearn.neural_network import MLPClassifier
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import MinMaxScaler
 
-import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
-from baetorch.baetorch.util.data_model_manager import DataModelManager
-from baetorch.baetorch.util.seed import bae_set_seed
 from .datastreams import IRIS_Datastream, BOSTON_Datastream
-import inspect
-import functools
-import pandas as pd
 
 # Datastream Agent
-from .ml_experiment import ML_ExperimentLite
 from .util.calc_auroc import calc_all_scores
 from .util.helper import flatten_dict
+from ..agentMET4FOF.agentMET4FOF.agents import AgentMET4FOF
+from ..baetorch.baetorch.util.data_model_manager import DataModelManager
+from ..baetorch.baetorch.util.seed import bae_set_seed
 
 
-class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
+class ML_BaseAgent(AgentMET4FOF):
     """
     Abstract base class with handy methods for all inherited agents.
 
@@ -29,7 +28,8 @@ class ML_BaseAgent(agentmet4fof_module.AgentMET4FOF):
     """
     example_axis = 0
 
-    def init_dmm(self, use_dmm, dmm_folder="E:/bae_data_models", disable_channels=[]):
+    # def init_dmm(self, use_dmm, dmm_folder="E:/bae_data_models", disable_channels=[]):
+    def init_dmm(self, use_dmm, dmm_folder="bae_data_models", disable_channels=[]):
         """
         Call this in the init_parameter, after storing local parameters
         which form the signature of the agent.

@@ -3,9 +3,9 @@ import pickle
 from datetime import datetime
 import pandas as pd
 import uuid
-import agentMET4FOF.agentMET4FOF.agents as agentmet4fof_module
-import agentMET4FOF_ml_extension.ml_agents as ml_agents
-from baetorch.baetorch.util.data_model_manager import DataModelManager
+from ..agentMET4FOF.agentMET4FOF.agents import Coalition
+from ..agentMET4FOF_ml_extension import ml_agents
+from ..baetorch.baetorch.util.data_model_manager import DataModelManager
 
 
 class ML_Results :
@@ -117,7 +117,7 @@ class ML_ExperimentLite:
         return exists
 
 
-class ML_ExperimentCoalition(agentmet4fof_module.Coalition):
+class ML_ExperimentCoalition(Coalition):
     """
     An ML Experiment has a run_date and ml_name identifier.
 
