@@ -2,3 +2,4 @@ agentMET4FOF > 0.1.11
 scikit-learn
 openpyxl
 progress
+h5py
